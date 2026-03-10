@@ -19,7 +19,16 @@
   ],
   "main": "./extension.js",
   "contributes": {
-    "commands": [],
+    "commands": [
+      {
+        "command": "zcobol-validation.wrapWithIf",
+        "title": "Envolver com IF...END-IF"
+      },
+      {
+        "command": "zcobol-validation.createConstant",
+        "title": "Criar constante"
+      }
+    ],
     "configuration": {
       "title": "zCobol Validation",
       "properties": {
@@ -27,6 +36,46 @@
           "type": "boolean",
           "default": true,
           "description": "Ativar validação de variáveis não utilizadas"
+        },
+        "zcobol-validation.enableUnprotectedDisplayCheck": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ativar validação de displays não protegidos (fora de blocos IF)"
+        },
+        "zcobol-validation.enableGoToCheck": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ativar validação de comandos GO TO"
+        },
+        "zcobol-validation.enableUnmatchedIfCheck": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ativar validação de IFs sem END-IF correspondente"
+        },
+        "zcobol-validation.enableHardcodedCheck": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ativar validação de valores hardcoded (strings e números literais)"
+        },
+        "zcobol-validation.enableHardcodedInString": {
+          "type": "boolean",
+          "default": false,
+          "description": "Ativar validação de valores hardcoded dentro de funções STRING e UNSTRING"
+        },
+        "zcobol-validation.enableHardcodedInDisplay": {
+          "type": "boolean",
+          "default": false,
+          "description": "Ativar validação de valores hardcoded dentro de comandos DISPLAY"
+        },
+        "zcobol-validation.defaultIfCondition": {
+          "type": "string",
+          "default": "",
+          "description": "Condição padrão para blocos IF (exemplo: '1 = 1' ou 'WS-FLAG = 'S'')"
+        },
+        "zcobol-validation.constantPrefix": {
+          "type": "string",
+          "default": "con-",
+          "description": "Prefixo usado para gerar nomes de constantes (ex: 'con-' gera con-valor)"
         }
       }
     }
