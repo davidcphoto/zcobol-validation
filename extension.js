@@ -916,6 +916,190 @@ function findFilesWithoutOperations(text) {
 }
 
 /**
+ * Extrai declarações de cursores no código COBOL (DECLARE CURSOR)
+ * @param {string} text
+ * @returns {Map<string, {line: number, column: number}>}
+ */
+function extractCursorDeclarations(text) {
+	const cursors = new Map();
+	const lines = text.split('\n');
+	let inExecSqlBlock = false;
+	let execSqlContent = '';
+	let execSqlStartLine = -1;
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+
+		// Ignora comentários
+		if (line.length > 6 && line[6] === '*') {
+			continue;
+		}
+
+		// Detecta início de bloco EXEC SQL
+		if (/EXEC\s+SQL/i.test(line)) {
+			inExecSqlBlock = true;
+			execSqlContent = line;
+			execSqlStartLine = i;
+			console.log(`Início de bloco EXEC SQL na linha ${i}`);
+		} else if (inExecSqlBlock) {
+			// Adiciona linha ao conteúdo do bloco SQL
+			execSqlContent += ' ' + line.trim();
+		}
+
+		// Detecta fim de bloco EXEC SQL
+		if (inExecSqlBlock && /END-EXEC/i.test(line)) {
+			console.log(`Fim de bloco EXEC SQL na linha ${i}, conteúdo: ${execSqlContent.substring(0, 100)}...`);
+
+			// Procura por DECLARE <nome> CURSOR no conteúdo completo do bloco
+			const declareMatch = execSqlContent.match(/DECLARE\s+([A-Z0-9][\w-]*)\s+CURSOR/i);
+			if (declareMatch) {
+				const cursorName = declareMatch[1].toUpperCase();
+
+				// Procura a linha onde o nome do cursor aparece para obter a coluna correta
+				let cursorLine = execSqlStartLine;
+				let cursorColumn = 0;
+				for (let j = execSqlStartLine; j <= i; j++) {
+					const searchLine = lines[j];
+					const idx = searchLine.toUpperCase().indexOf(cursorName);
+					if (idx !== -1) {
+						cursorLine = j;
+						cursorColumn = idx;
+						break;
+					}
+				}
+
+				cursors.set(cursorName, {
+					line: cursorLine,
+					column: cursorColumn
+				});
+				console.log(`Cursor declarado: ${cursorName} na linha ${cursorLine}`);
+			}
+
+			// Reset para próximo bloco
+			inExecSqlBlock = false;
+			execSqlContent = '';
+			execSqlStartLine = -1;
+		}
+	}
+
+	return cursors;
+}
+
+/**
+ * Verifica operações de cursores (OPEN, FETCH, CLOSE) no código
+ * @param {string} text
+ * @param {string} cursorName - Nome do cursor a verificar
+ * @returns {{hasOpen: boolean, hasFetch: boolean, hasClose: boolean}}
+ */
+function hasCursorOperations(text, cursorName) {
+	const lines = text.split('\n');
+	let inProcedureDivision = false;
+	let hasOpen = false;
+	let hasFetch = false;
+	let hasClose = false;
+	let inExecSqlBlock = false;
+	let execSqlContent = '';
+
+	// Escapar hífens no nome do cursor para usar em regex
+	const escapedCursorName = cursorName.replace(/-/g, '\\-');
+	const cursorNameRegex = new RegExp('\\b' + escapedCursorName + '\\b', 'i');
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+
+		// Detecta início da PROCEDURE DIVISION
+		if (/^\s*PROCEDURE\s+DIVISION/i.test(line)) {
+			inProcedureDivision = true;
+			continue;
+		}
+
+		if (!inProcedureDivision) {
+			continue;
+		}
+
+		// Ignora comentários
+		if (line.length > 6 && line[6] === '*') {
+			continue;
+		}
+
+		// Detecta início de bloco EXEC SQL
+		if (/EXEC\s+SQL/i.test(line)) {
+			inExecSqlBlock = true;
+			execSqlContent = line;
+		} else if (inExecSqlBlock) {
+			// Adiciona linha ao conteúdo do bloco SQL
+			execSqlContent += ' ' + line.trim();
+		}
+
+		// Detecta fim de bloco EXEC SQL
+		if (inExecSqlBlock && /END-EXEC/i.test(line)) {
+			// Processa o bloco SQL completo
+
+			// Verifica OPEN
+			if (/\bOPEN\b/i.test(execSqlContent) && cursorNameRegex.test(execSqlContent)) {
+				hasOpen = true;
+				console.log(`OPEN encontrado para cursor ${cursorName} na linha ${i}`);
+			}
+
+			// Verifica FETCH
+			if (/\bFETCH\b/i.test(execSqlContent) && cursorNameRegex.test(execSqlContent)) {
+				hasFetch = true;
+				console.log(`FETCH encontrado para cursor ${cursorName} na linha ${i}`);
+			}
+
+			// Verifica CLOSE
+			if (/\bCLOSE\b/i.test(execSqlContent) && cursorNameRegex.test(execSqlContent)) {
+				hasClose = true;
+				console.log(`CLOSE encontrado para cursor ${cursorName} na linha ${i}`);
+			}
+
+			// Reset para próximo bloco
+			inExecSqlBlock = false;
+			execSqlContent = '';
+		}
+	}
+
+	return { hasOpen, hasFetch, hasClose };
+}
+
+/**
+ * Verifica cursores sem operações completas (OPEN, FETCH, CLOSE)
+ * @param {string} text
+ * @returns {Array<{cursorName: string, line: number, column: number, missing: string[]}>}
+ */
+function findCursorsWithoutOperations(text) {
+	const cursorsWithoutOps = [];
+	const declaredCursors = extractCursorDeclarations(text);
+
+	for (const [cursorName, position] of declaredCursors) {
+		const operations = hasCursorOperations(text, cursorName);
+		const missing = [];
+
+		if (!operations.hasOpen) {
+			missing.push('OPEN');
+		}
+		if (!operations.hasFetch) {
+			missing.push('FETCH');
+		}
+		if (!operations.hasClose) {
+			missing.push('CLOSE');
+		}
+
+		if (missing.length > 0) {
+			cursorsWithoutOps.push({
+				cursorName: cursorName,
+				line: position.line,
+				column: position.column,
+				missing: missing
+			});
+			console.log(`Cursor ${cursorName} sem operações: ${missing.join(', ')}`);
+		}
+	}
+
+	return cursorsWithoutOps;
+}
+
+/**
  * Verifica valores hardcoded no código (strings e números literais)
  * @param {string} text
  * @returns {Array<{line: number, column: number, length: number, value: string, type: string}>}
@@ -1405,6 +1589,33 @@ function validateCobolDocument(document) {
 				vscode.DiagnosticSeverity.Warning
 			);
 			diagnostic.code = 'missing-file-operations';
+			diagnostic.source = 'zCobol Validation';
+
+			diagnostics.push(diagnostic);
+		}
+	}
+
+	// Validação de operações de cursor (OPEN, FETCH, CLOSE)
+	const enableCursorOperationsCheck = config.get('enableCursorOperationsCheck', true);
+	if (enableCursorOperationsCheck) {
+		const cursorsWithoutOps = findCursorsWithoutOperations(text);
+		console.log('Cursores sem operações completas:', cursorsWithoutOps.length);
+
+		for (const cursor of cursorsWithoutOps) {
+			const range = new vscode.Range(
+				cursor.line,
+				cursor.column,
+				cursor.line,
+				cursor.column + cursor.cursorName.length
+			);
+
+			const missingOps = cursor.missing.join(', ');
+			const diagnostic = new vscode.Diagnostic(
+				range,
+				`Cursor '${cursor.cursorName}' declarado mas falta(m): ${missingOps}`,
+				vscode.DiagnosticSeverity.Warning
+			);
+			diagnostic.code = 'missing-cursor-operations';
 			diagnostic.source = 'zCobol Validation';
 
 			diagnostics.push(diagnostic);
@@ -2029,6 +2240,7 @@ function activate(context) {
 			    event.affectsConfiguration('zcobol-validation.enableLowerCaseCheck') ||
 			    event.affectsConfiguration('zcobol-validation.enableSymbolicOperatorCheck') ||
 			    event.affectsConfiguration('zcobol-validation.enableFileOperationsCheck') ||
+			    event.affectsConfiguration('zcobol-validation.enableCursorOperationsCheck') ||
 			    event.affectsConfiguration('zcobol-validation.operatorFormat')) {
 				console.log('Configuração alterada - revalidando todos os documentos');
 				vscode.workspace.textDocuments.forEach(document => {

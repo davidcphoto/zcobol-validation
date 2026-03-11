@@ -111,6 +111,11 @@
           "type": "boolean",
           "default": true,
           "description": "Ativar validação de operações de ficheiro (OPEN, CLOSE, READ/WRITE)"
+        },
+        "zcobol-validation.enableCursorOperationsCheck": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ativar validação de operações de cursor (OPEN, FETCH, CLOSE)"
         }
       }
     }
