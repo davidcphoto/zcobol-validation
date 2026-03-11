@@ -57,10 +57,20 @@
           "default": false,
           "description": "Ativar validação de IFs sem ELSE (desativado por padrão)"
         },
+        "zcobol-validation.enableEvaluateWithoutWhenOtherCheck": {
+          "type": "boolean",
+          "default": false,
+          "description": "Ativar validação de EVALUATE sem WHEN OTHER (desativado por padrão)"
+        },
         "zcobol-validation.enableHardcodedCheck": {
           "type": "boolean",
           "default": true,
           "description": "Ativar validação de valores hardcoded (strings e números literais)"
+        },
+        "zcobol-validation.enableLowerCaseCheck": {
+          "type": "boolean",
+          "default": false,
+          "description": "Ativar validação de código em minúsculas - COBOL deve ser escrito em maiúsculas (desativado por padrão)"
         },
         "zcobol-validation.enableSymbolicOperatorCheck": {
           "type": "boolean",
@@ -96,6 +106,11 @@
           "type": "string",
           "default": "con-",
           "description": "Prefixo usado para gerar nomes de constantes (ex: 'con-' gera con-valor)"
+        },
+        "zcobol-validation.enableFileOperationsCheck": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ativar validação de operações de ficheiro (OPEN, CLOSE, READ/WRITE)"
         }
       }
     }

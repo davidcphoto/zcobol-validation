@@ -594,6 +594,328 @@ function findIfsWithoutElse(text) {
 }
 
 /**
+ * Verifica EVALUATE sem WHEN OTHER
+ * @param {string} text
+ * @returns {Array<{line: number, column: number, length: number}>}
+ */
+function findEvaluatesWithoutWhenOther(text) {
+	const evaluatesWithoutWhenOther = [];
+	const lines = text.split('\n');
+	let inProcedureDivision = false;
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+
+		// Detecta início da PROCEDURE DIVISION
+		if (/^\s*PROCEDURE\s+DIVISION/i.test(line)) {
+			inProcedureDivision = true;
+			continue;
+		}
+
+		if (!inProcedureDivision) {
+			continue;
+		}
+
+		// Ignora comentários
+		if (line.length > 6 && line[6] === '*') {
+			continue;
+		}
+
+		const lineContent = line.substring(6);
+
+		// Detecta EVALUATE
+		const evaluateMatch = lineContent.match(/^\s*(EVALUATE\s+)/i);
+		if (evaluateMatch) {
+			const column = line.indexOf(evaluateMatch[1]);
+			const evaluateInfo = {
+				line: i,
+				column: column,
+				length: evaluateMatch[1].trim().length
+			};
+
+			// Procura WHEN OTHER ou END-EVALUATE correspondente
+			let nestingLevel = 1;
+			let hasWhenOther = false;
+
+			for (let j = i + 1; j < lines.length; j++) {
+				const nextLine = lines[j];
+
+				// Ignora comentários
+				if (nextLine.length > 6 && nextLine[6] === '*') {
+					continue;
+				}
+
+				const nextLineContent = nextLine.substring(6);
+
+				// Detecta EVALUATE aninhado
+				if (/^\s*EVALUATE\s+/i.test(nextLineContent)) {
+					nestingLevel++;
+				}
+
+				// Detecta WHEN OTHER no mesmo nível
+				if (/^\s*WHEN\s+OTHER\b/i.test(nextLineContent) && nestingLevel === 1) {
+					hasWhenOther = true;
+					break;
+				}
+
+				// Detecta END-EVALUATE
+				if (/^\s*END-EVALUATE/i.test(nextLineContent)) {
+					nestingLevel--;
+					if (nestingLevel === 0) {
+						// Chegou ao fim deste EVALUATE sem encontrar WHEN OTHER
+						break;
+					}
+				}
+			}
+
+			if (!hasWhenOther) {
+				evaluatesWithoutWhenOther.push(evaluateInfo);
+				console.log(`EVALUATE sem WHEN OTHER encontrado na linha ${i}`);
+			}
+		}
+	}
+
+	return evaluatesWithoutWhenOther;
+}
+
+/**
+ * Verifica código em minúsculas (lower case)
+ * @param {string} text
+ * @returns {Array<{line: number, column: number, length: number, word: string}>}
+ */
+function findLowerCaseCode(text) {
+	const lowerCaseCode = [];
+	const lines = text.split('\n');
+	let inProcedureDivision = false;
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+
+		// Detecta início da PROCEDURE DIVISION
+		if (/^\s*PROCEDURE\s+DIVISION/i.test(line)) {
+			inProcedureDivision = true;
+			continue;
+		}
+
+		if (!inProcedureDivision) {
+			continue;
+		}
+
+		// Ignora comentários
+		if (line.length > 6 && line[6] === '*') {
+			continue;
+		}
+
+		const lineContent = line.substring(6);
+
+		// Remove strings literais da linha para não validar o conteúdo delas
+		let lineWithoutStrings = lineContent;
+		const stringMatches = [...lineContent.matchAll(/(['"])([^'"]*?)\1/g)];
+		const stringRanges = [];
+		for (const match of stringMatches) {
+			const start = match.index;
+			const end = match.index + match[0].length;
+			stringRanges.push({ start, end });
+			lineWithoutStrings = lineWithoutStrings.replace(match[0], '"'.repeat(match[0].length));
+		}
+
+		// Procura por todas as palavras (qualquer combinação de letras, números e hífens)
+		// Palavras são sequências de letras (maiúsculas ou minúsculas), números e hífens
+		const wordMatches = [...lineWithoutStrings.matchAll(/\b[A-Za-z][A-Za-z0-9-]*\b/g)];
+
+		for (const match of wordMatches) {
+			const word = match[0];
+			const matchIndex = match.index;
+
+			// Verifica se a palavra está dentro de uma string literal
+			const isInString = stringRanges.some(range => matchIndex >= range.start && matchIndex < range.end);
+			if (isInString) {
+				continue;
+			}
+
+			// Se tem pelo menos uma letra minúscula, adiciona ao resultado
+			if (/[a-z]/.test(word)) {
+				const column = 6 + matchIndex;
+				lowerCaseCode.push({
+					line: i,
+					column: column,
+					length: word.length,
+					word: word
+				});
+				console.log(`Código em minúsculas encontrado na linha ${i}: ${word}`);
+			}
+		}
+	}
+
+	return lowerCaseCode;
+}
+
+/**
+ * Extrai declarações de ficheiros no código COBOL (SELECT statements)
+ * @param {string} text
+ * @returns {Map<string, {line: number, column: number}>}
+ */
+function extractFileDeclarations(text) {
+	const files = new Map();
+	const lines = text.split('\n');
+	let inFileControl = false;
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+
+		// Detecta início da FILE-CONTROL
+		if (/^\s*FILE-CONTROL/i.test(line)) {
+			inFileControl = true;
+			console.log(`FILE-CONTROL encontrado na linha ${i}`);
+			continue;
+		}
+
+		// Detecta fim da FILE-CONTROL (quando encontra outra seção ou divisão)
+		if (inFileControl && /^\s*(I-O-CONTROL|DATA\s+DIVISION|PROCEDURE\s+DIVISION)/i.test(line)) {
+			inFileControl = false;
+			console.log(`Fim de FILE-CONTROL na linha ${i}`);
+			continue;
+		}
+
+		// Se estamos na FILE-CONTROL, procura declarações SELECT
+		if (inFileControl) {
+			// Ignora comentários
+			if (line.length > 6 && line[6] === '*') {
+				continue;
+			}
+
+			// Procura por SELECT <nome-ficheiro>
+			const selectMatch = line.match(/^\s*SELECT\s+([A-Z0-9][\w-]*)/i);
+			if (selectMatch) {
+				const fileName = selectMatch[1].toUpperCase();
+				const column = line.indexOf(selectMatch[1]);
+				files.set(fileName, {
+					line: i,
+					column: column
+				});
+				console.log(`Ficheiro declarado: ${fileName} na linha ${i}`);
+			}
+		}
+	}
+
+	return files;
+}
+
+/**
+ * Verifica operações de ficheiros (OPEN, CLOSE, READ, WRITE) no código
+ * @param {string} text
+ * @param {string} fileName - Nome do ficheiro a verificar
+ * @returns {{hasOpen: boolean, hasClose: boolean, hasReadOrWrite: boolean}}
+ */
+function hasFileOperations(text, fileName) {
+	const lines = text.split('\n');
+	let inProcedureDivision = false;
+	let hasOpen = false;
+	let hasClose = false;
+	let hasReadOrWrite = false;
+
+	// Escapar hífens no nome do ficheiro para usar em regex
+	const escapedFileName = fileName.replace(/-/g, '\\-');
+	const fileNameRegex = new RegExp('\\b' + escapedFileName + '\\b', 'i');
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+
+		// Detecta início da PROCEDURE DIVISION
+		if (/^\s*PROCEDURE\s+DIVISION/i.test(line)) {
+			inProcedureDivision = true;
+			continue;
+		}
+
+		if (!inProcedureDivision) {
+			continue;
+		}
+
+		// Ignora comentários
+		if (line.length > 6 && line[6] === '*') {
+			continue;
+		}
+
+		const lineContent = line.substring(6);
+
+		// Verifica OPEN com o nome do ficheiro
+		if (/^\s*OPEN\s+(INPUT|OUTPUT|I-O|EXTEND)/i.test(lineContent)) {
+			if (fileNameRegex.test(lineContent)) {
+				hasOpen = true;
+				console.log(`OPEN encontrado para ${fileName} na linha ${i}`);
+			}
+		}
+
+		// Verifica CLOSE com o nome do ficheiro
+		if (/^\s*CLOSE\s+/i.test(lineContent)) {
+			if (fileNameRegex.test(lineContent)) {
+				hasClose = true;
+				console.log(`CLOSE encontrado para ${fileName} na linha ${i}`);
+			}
+		}
+
+		// Verifica READ com o nome do ficheiro
+		if (/^\s*READ\s+/i.test(lineContent)) {
+			if (fileNameRegex.test(lineContent)) {
+				hasReadOrWrite = true;
+				console.log(`READ encontrado para ${fileName} na linha ${i}`);
+			}
+		}
+
+		// Verifica WRITE com o nome do ficheiro ou com o record associado
+		// Em COBOL, WRITE usa o nome do record, não o ficheiro diretamente
+		// Mas podemos verificar se há algum WRITE no código quando há um ficheiro OUTPUT/EXTEND
+		if (/^\s*WRITE\s+/i.test(lineContent)) {
+			// Para simplificar, marcamos como tendo WRITE se encontramos qualquer WRITE
+			// Uma validação mais rigorosa precisaria rastrear o FD e os records
+			if (fileNameRegex.test(lineContent)) {
+				hasReadOrWrite = true;
+				console.log(`WRITE encontrado para ${fileName} na linha ${i}`);
+			}
+		}
+	}
+
+	return { hasOpen, hasClose, hasReadOrWrite };
+}
+
+/**
+ * Verifica ficheiros sem operações completas (OPEN, CLOSE, READ/WRITE)
+ * @param {string} text
+ * @returns {Array<{fileName: string, line: number, column: number, missing: string[]}>}
+ */
+function findFilesWithoutOperations(text) {
+	const filesWithoutOps = [];
+	const declaredFiles = extractFileDeclarations(text);
+
+	for (const [fileName, position] of declaredFiles) {
+		const operations = hasFileOperations(text, fileName);
+		const missing = [];
+
+		if (!operations.hasOpen) {
+			missing.push('OPEN');
+		}
+		if (!operations.hasClose) {
+			missing.push('CLOSE');
+		}
+		if (!operations.hasReadOrWrite) {
+			missing.push('READ ou WRITE');
+		}
+
+		if (missing.length > 0) {
+			filesWithoutOps.push({
+				fileName: fileName,
+				line: position.line,
+				column: position.column,
+				missing: missing
+			});
+			console.log(`Ficheiro ${fileName} sem operações: ${missing.join(', ')}`);
+		}
+	}
+
+	return filesWithoutOps;
+}
+
+/**
  * Verifica valores hardcoded no código (strings e números literais)
  * @param {string} text
  * @returns {Array<{line: number, column: number, length: number, value: string, type: string}>}
@@ -939,6 +1261,32 @@ function validateCobolDocument(document) {
 		}
 	}
 
+	// Validação de EVALUATE sem WHEN OTHER
+	const enableEvaluateWithoutWhenOtherCheck = config.get('enableEvaluateWithoutWhenOtherCheck', false);
+	if (enableEvaluateWithoutWhenOtherCheck) {
+		const evaluatesWithoutWhenOther = findEvaluatesWithoutWhenOther(text);
+		console.log('EVALUATE sem WHEN OTHER encontrados:', evaluatesWithoutWhenOther.length);
+
+		for (const evaluateStatement of evaluatesWithoutWhenOther) {
+			const range = new vscode.Range(
+				evaluateStatement.line,
+				evaluateStatement.column,
+				evaluateStatement.line,
+				evaluateStatement.column + evaluateStatement.length
+			);
+
+			const diagnostic = new vscode.Diagnostic(
+				range,
+				`EVALUATE sem WHEN OTHER - considere adicionar um bloco WHEN OTHER para garantir cobertura completa`,
+				vscode.DiagnosticSeverity.Warning
+			);
+			diagnostic.code = 'evaluate-without-when-other';
+			diagnostic.source = 'zCobol Validation';
+
+			diagnostics.push(diagnostic);
+		}
+	}
+
 	// Validação de operadores simbólicos em IFs
 	const enableSymbolicOperatorCheck = config.get('enableSymbolicOperatorCheck', true);
 	if (enableSymbolicOperatorCheck) {
@@ -1000,6 +1348,64 @@ function validateCobolDocument(document) {
 				location: new vscode.Location(document.uri, range),
 				message: `${hardcoded.type}:${hardcoded.value}`
 			}];
+
+			diagnostics.push(diagnostic);
+		}
+	}
+
+	// Validação de código em minúsculas
+	const enableLowerCaseCheck = config.get('enableLowerCaseCheck', false);
+	if (enableLowerCaseCheck) {
+		const lowerCaseCode = findLowerCaseCode(text);
+		console.log('Código em minúsculas encontrado:', lowerCaseCode.length);
+
+		for (const lowerCase of lowerCaseCode) {
+			const range = new vscode.Range(
+				lowerCase.line,
+				lowerCase.column,
+				lowerCase.line,
+				lowerCase.column + lowerCase.length
+			);
+
+			const diagnostic = new vscode.Diagnostic(
+				range,
+				`Código em minúsculas detectado: '${lowerCase.word}' - COBOL deve ser escrito em maiúsculas`,
+				vscode.DiagnosticSeverity.Warning
+			);
+			diagnostic.code = 'lower-case-code';
+			diagnostic.source = 'zCobol Validation';
+			// Armazena a palavra no diagnostic para usar nas code actions
+			diagnostic.relatedInformation = [{
+				location: new vscode.Location(document.uri, range),
+				message: lowerCase.word
+			}];
+
+			diagnostics.push(diagnostic);
+		}
+	}
+
+	// Validação de operações de ficheiro (OPEN, CLOSE, READ/WRITE)
+	const enableFileOperationsCheck = config.get('enableFileOperationsCheck', true);
+	if (enableFileOperationsCheck) {
+		const filesWithoutOps = findFilesWithoutOperations(text);
+		console.log('Ficheiros sem operações completas:', filesWithoutOps.length);
+
+		for (const file of filesWithoutOps) {
+			const range = new vscode.Range(
+				file.line,
+				file.column,
+				file.line,
+				file.column + file.fileName.length
+			);
+
+			const missingOps = file.missing.join(', ');
+			const diagnostic = new vscode.Diagnostic(
+				range,
+				`Ficheiro '${file.fileName}' declarado mas falta(m): ${missingOps}`,
+				vscode.DiagnosticSeverity.Warning
+			);
+			diagnostic.code = 'missing-file-operations';
+			diagnostic.source = 'zCobol Validation';
 
 			diagnostics.push(diagnostic);
 		}
@@ -1245,6 +1651,66 @@ class CobolCodeActionProvider {
 				}
 			}
 
+			// Code actions para EVALUATE sem WHEN OTHER
+			if (diagnostic.source === 'zCobol Validation' && diagnostic.code === 'evaluate-without-when-other') {
+				const line = document.lineAt(diagnostic.range.start.line);
+				const lineText = line.text;
+				const indentation = lineText.substring(0, lineText.search(/\S|$/));
+
+				// Ação 1: Adicionar WHEN OTHER com CONTINUE
+				const addWhenOtherContinue = new vscode.CodeAction('Adicionar WHEN OTHER com CONTINUE', vscode.CodeActionKind.QuickFix);
+				addWhenOtherContinue.diagnostics = [diagnostic];
+				addWhenOtherContinue.edit = new vscode.WorkspaceEdit();
+
+				// Encontra o END-EVALUATE correspondente
+				let endEvaluateLine = -1;
+				let nestingLevel = 1;
+				for (let j = diagnostic.range.start.line + 1; j < document.lineCount; j++) {
+					const nextLine = document.lineAt(j);
+					const content = nextLine.text.substring(6);
+
+					// Ignora comentários
+					if (nextLine.text.length > 6 && nextLine.text[6] === '*') {
+						continue;
+					}
+
+					// Detecta EVALUATE aninhado
+					if (/^\s*EVALUATE\s+/i.test(content)) {
+						nestingLevel++;
+					}
+
+					// Detecta END-EVALUATE
+					if (/^\s*END-EVALUATE/i.test(content)) {
+						nestingLevel--;
+						if (nestingLevel === 0) {
+							endEvaluateLine = j;
+							break;
+						}
+					}
+				}
+
+				if (endEvaluateLine !== -1) {
+					// Insere WHEN OTHER com CONTINUE antes do END-EVALUATE
+					addWhenOtherContinue.edit.insert(
+						document.uri,
+						new vscode.Position(endEvaluateLine, 0),
+						`${indentation}WHEN OTHER\n${indentation}   CONTINUE\n`
+					);
+					codeActions.push(addWhenOtherContinue);
+
+					// Ação 2: Adicionar apenas WHEN OTHER
+					const addWhenOther = new vscode.CodeAction('Adicionar WHEN OTHER', vscode.CodeActionKind.QuickFix);
+					addWhenOther.diagnostics = [diagnostic];
+					addWhenOther.edit = new vscode.WorkspaceEdit();
+					addWhenOther.edit.insert(
+						document.uri,
+						new vscode.Position(endEvaluateLine, 0),
+						`${indentation}WHEN OTHER\n${indentation}   \n`
+					);
+					codeActions.push(addWhenOther);
+				}
+			}
+
 			// Code actions para operadores simbólicos
 			if (diagnostic.source === 'zCobol Validation' && diagnostic.code === 'symbolic-operator') {
 				// Extrai o operador e replacement do diagnostic
@@ -1286,6 +1752,24 @@ class CobolCodeActionProvider {
 					arguments: [document, diagnostic.range, hardcodedValue, valueType]
 				};
 				codeActions.push(createConstant);
+			}
+
+			// Code actions para código em minúsculas
+			if (diagnostic.source === 'zCobol Validation' && diagnostic.code === 'lower-case-code') {
+				// Extrai a palavra do diagnostic
+				let word = '';
+				if (diagnostic.relatedInformation && diagnostic.relatedInformation.length > 0) {
+					word = diagnostic.relatedInformation[0].message;
+				}
+
+				const upperCaseWord = word.toUpperCase();
+
+				// Ação: Converter para maiúsculas
+				const convertToUpperCase = new vscode.CodeAction(`Converter para maiúsculas: ${upperCaseWord}`, vscode.CodeActionKind.QuickFix);
+				convertToUpperCase.diagnostics = [diagnostic];
+				convertToUpperCase.edit = new vscode.WorkspaceEdit();
+				convertToUpperCase.edit.replace(document.uri, diagnostic.range, upperCaseWord);
+				codeActions.push(convertToUpperCase);
 			}
 		}
 
@@ -1540,8 +2024,11 @@ function activate(context) {
 			    event.affectsConfiguration('zcobol-validation.enableGoToCheck') ||
 			    event.affectsConfiguration('zcobol-validation.enableUnmatchedIfCheck') ||
 			    event.affectsConfiguration('zcobol-validation.enableIfWithoutElseCheck') ||
+			    event.affectsConfiguration('zcobol-validation.enableEvaluateWithoutWhenOtherCheck') ||
 			    event.affectsConfiguration('zcobol-validation.enableHardcodedCheck') ||
+			    event.affectsConfiguration('zcobol-validation.enableLowerCaseCheck') ||
 			    event.affectsConfiguration('zcobol-validation.enableSymbolicOperatorCheck') ||
+			    event.affectsConfiguration('zcobol-validation.enableFileOperationsCheck') ||
 			    event.affectsConfiguration('zcobol-validation.operatorFormat')) {
 				console.log('Configuração alterada - revalidando todos os documentos');
 				vscode.workspace.textDocuments.forEach(document => {
