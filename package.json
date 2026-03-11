@@ -52,10 +52,30 @@
           "default": true,
           "description": "Ativar validação de IFs sem END-IF correspondente"
         },
+        "zcobol-validation.enableIfWithoutElseCheck": {
+          "type": "boolean",
+          "default": false,
+          "description": "Ativar validação de IFs sem ELSE (desativado por padrão)"
+        },
         "zcobol-validation.enableHardcodedCheck": {
           "type": "boolean",
           "default": true,
           "description": "Ativar validação de valores hardcoded (strings e números literais)"
+        },
+        "zcobol-validation.enableSymbolicOperatorCheck": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ativar validação de operadores simbólicos (<, >, =) em condições IF, sugerindo LESS THAN, GREATER THAN, EQUAL"
+        },
+        "zcobol-validation.operatorFormat": {
+          "type": "string",
+          "default": "long",
+          "enum": ["long", "short"],
+          "enumDescriptions": [
+            "LESS/GREATER THAN OR EQUAL (forma longa)",
+            "LESS/GREATER OR EQUAL (forma curta)"
+          ],
+          "description": "Formato dos operadores compostos nas sugestões de validação"
         },
         "zcobol-validation.enableHardcodedInString": {
           "type": "boolean",

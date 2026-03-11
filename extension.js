@@ -282,6 +282,131 @@ function findUnprotectedDisplays(text) {
 }
 
 /**
+ * Verifica uso de símbolos (<, >, =) em condições IF e WHEN
+ * @param {string} text
+ * @param {boolean} useShortForm - Se true, usa LESS OR EQUAL e GREATER OR EQUAL em vez das formas longas
+ * @returns {Array<{line: number, column: number, length: number, operator: string, replacement: string}>}
+ */
+function findSymbolicOperatorsInIf(text, useShortForm = false) {
+	const operators = [];
+	const lines = text.split('\n');
+	let inProcedureDivision = false;
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+
+		// Detecta início da PROCEDURE DIVISION
+		if (/^\s*PROCEDURE\s+DIVISION/i.test(line)) {
+			inProcedureDivision = true;
+			continue;
+		}
+
+		if (!inProcedureDivision) {
+			continue;
+		}
+
+		// Ignora comentários
+		if (line.length > 6 && line[6] === '*') {
+			continue;
+		}
+
+		const lineContent = line.substring(6);
+
+		// Procura linhas com IF ou WHEN
+		if (/^\s*(IF|WHEN)\s+/i.test(lineContent)) {
+			// Procura símbolos <, >, = na condição
+			// Usa regex para encontrar os símbolos, evitando falsas deteções em strings
+			const symbolPatterns = [
+				{ regex: /<>/g, operator: '<>', replacement: 'NOT EQUAL' },
+				{ regex: />=/g, operator: '>=', replacement: useShortForm ? 'GREATER OR EQUAL' : 'GREATER THAN OR EQUAL' },
+				{ regex: /<=/g, operator: '<=', replacement: useShortForm ? 'LESS OR EQUAL' : 'LESS THAN OR EQUAL' },
+				{ regex: /(?<![<>])>(?!=)/g, operator: '>', replacement: 'GREATER THAN' },
+				{ regex: /(?<![<>])<(?![=>])/g, operator: '<', replacement: 'LESS THAN' },
+				{ regex: /(?<![<>])=(?!=)/g, operator: '=', replacement: 'EQUAL' }
+			];
+
+			// Coleta todas as linhas que fazem parte da condição
+			const conditionLines = [{ lineIndex: i, content: lineContent, fullLine: line }];
+			let currentIndex = i;
+
+			// Verifica se a condição continua nas próximas linhas
+			while (currentIndex < lines.length - 1) {
+				const currentContent = conditionLines[conditionLines.length - 1].content.trim();
+
+				// Se termina com ponto, fim da condição
+				if (currentContent.endsWith('.')) {
+					break;
+				}
+
+				// Se contém THEN (explícito), as próximas linhas não são parte da condição
+				if (/\bTHEN\b/i.test(currentContent)) {
+					break;
+				}
+
+				// Se termina com palavra-chave que indica fim da condição
+				if (/\b(ELSE|END-IF|END-EVALUATE)\s*$/i.test(currentContent)) {
+					break;
+				}
+
+				// Verifica próxima linha
+				const nextIndex = currentIndex + 1;
+				const nextLine = lines[nextIndex];
+
+				// Se é comentário, pula mas continua verificando
+				if (nextLine.length > 6 && nextLine[6] === '*') {
+					currentIndex++;
+					continue;
+				}
+
+				const nextLineContent = nextLine.substring(6);
+
+				// Se a próxima linha inicia um novo comando ou parágrafo, fim da condição
+				if (/^\s{0,3}[A-Z0-9][A-Z0-9-]*\s*\./i.test(nextLineContent) ||
+				    /^\s*(IF|WHEN|MOVE|DISPLAY|PERFORM|COMPUTE|ADD|SUBTRACT|MULTIPLY|DIVIDE|EVALUATE|END-IF|END-EVALUATE|ELSE|CONTINUE|STOP|EXIT|GOBACK|GO\s+TO)\b/i.test(nextLineContent)) {
+					break;
+				}
+
+				// Adiciona linha de continuação da condição
+				conditionLines.push({ lineIndex: nextIndex, content: nextLineContent, fullLine: nextLine });
+				currentIndex++;
+			}
+
+			// Processa cada linha da condição
+			for (const { lineIndex, content } of conditionLines) {
+				// Remove strings literais da linha para evitar detetar símbolos dentro de strings
+				let lineWithoutStrings = content;
+				const stringMatches = [...content.matchAll(/(['"])([^'"]*?)\1/g)];
+				for (const match of stringMatches) {
+					lineWithoutStrings = lineWithoutStrings.replace(match[0], '""');
+				}
+
+				// Procura cada tipo de operador
+				for (const pattern of symbolPatterns) {
+					const matches = [...lineWithoutStrings.matchAll(pattern.regex)];
+					for (const match of matches) {
+						const matchIndex = match.index;
+						const column = 6 + matchIndex;
+						operators.push({
+							line: lineIndex,
+							column: column,
+							length: pattern.operator.length,
+							operator: pattern.operator,
+							replacement: pattern.replacement
+						});
+						console.log(`Operador simbólico '${pattern.operator}' encontrado na linha ${lineIndex}`);
+					}
+				}
+			}
+
+			// Avança o índice principal para não reprocessar linhas já verificadas
+			i = currentIndex;
+		}
+	}
+
+	return operators;
+}
+
+/**
  * Verifica comandos GO TO no código
  * @param {string} text
  * @returns {Array<{line: number, column: number, length: number, target: string}>}
@@ -381,6 +506,91 @@ function findUnmatchedIfs(text) {
 	// IFs que sobraram no stack não têm END-IF correspondente
 	console.log(`IFs sem END-IF: ${ifStack.length}`);
 	return ifStack;
+}
+
+/**
+ * Verifica IFs sem ELSE correspondente
+ * @param {string} text
+ * @returns {Array<{line: number, column: number, length: number}>}
+ */
+function findIfsWithoutElse(text) {
+	const ifsWithoutElse = [];
+	const lines = text.split('\n');
+	let inProcedureDivision = false;
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+
+		// Detecta início da PROCEDURE DIVISION
+		if (/^\s*PROCEDURE\s+DIVISION/i.test(line)) {
+			inProcedureDivision = true;
+			continue;
+		}
+
+		if (!inProcedureDivision) {
+			continue;
+		}
+
+		// Ignora comentários
+		if (line.length > 6 && line[6] === '*') {
+			continue;
+		}
+
+		const lineContent = line.substring(6);
+
+		// Detecta IF (mas não END-IF)
+		const ifMatch = lineContent.match(/^\s*(IF\s+)/i);
+		if (ifMatch && !/^\s*END-IF/i.test(lineContent)) {
+			const column = line.indexOf(ifMatch[1]);
+			const ifInfo = {
+				line: i,
+				column: column,
+				length: ifMatch[1].trim().length
+			};
+
+			// Procura ELSE ou END-IF correspondente
+			let nestingLevel = 1;
+			let hasElse = false;
+
+			for (let j = i + 1; j < lines.length; j++) {
+				const nextLine = lines[j];
+
+				// Ignora comentários
+				if (nextLine.length > 6 && nextLine[6] === '*') {
+					continue;
+				}
+
+				const nextLineContent = nextLine.substring(6);
+
+				// Detecta novo IF aninhado
+				if (/^\s*IF\s+/i.test(nextLineContent) && !/^\s*END-IF/i.test(nextLineContent)) {
+					nestingLevel++;
+				}
+
+				// Detecta ELSE no mesmo nível
+				if (/^\s*ELSE\b/i.test(nextLineContent) && nestingLevel === 1) {
+					hasElse = true;
+					break;
+				}
+
+				// Detecta END-IF
+				if (/^\s*END-IF/i.test(nextLineContent)) {
+					nestingLevel--;
+					if (nestingLevel === 0) {
+						// Chegou ao fim deste IF sem encontrar ELSE
+						break;
+					}
+				}
+			}
+
+			if (!hasElse) {
+				ifsWithoutElse.push(ifInfo);
+				console.log(`IF sem ELSE encontrado na linha ${i}`);
+			}
+		}
+	}
+
+	return ifsWithoutElse;
 }
 
 /**
@@ -703,6 +913,65 @@ function validateCobolDocument(document) {
 		}
 	}
 
+	// Validação de IFs sem ELSE
+	const enableIfWithoutElseCheck = config.get('enableIfWithoutElseCheck', false);
+	if (enableIfWithoutElseCheck) {
+		const ifsWithoutElse = findIfsWithoutElse(text);
+		console.log('IFs sem ELSE encontrados:', ifsWithoutElse.length);
+
+		for (const ifStatement of ifsWithoutElse) {
+			const range = new vscode.Range(
+				ifStatement.line,
+				ifStatement.column,
+				ifStatement.line,
+				ifStatement.column + ifStatement.length
+			);
+
+			const diagnostic = new vscode.Diagnostic(
+				range,
+				`IF sem ELSE - considere adicionar um bloco ELSE para garantir cobertura completa`,
+				vscode.DiagnosticSeverity.Warning
+			);
+			diagnostic.code = 'if-without-else';
+			diagnostic.source = 'zCobol Validation';
+
+			diagnostics.push(diagnostic);
+		}
+	}
+
+	// Validação de operadores simbólicos em IFs
+	const enableSymbolicOperatorCheck = config.get('enableSymbolicOperatorCheck', true);
+	if (enableSymbolicOperatorCheck) {
+		const operatorFormat = config.get('operatorFormat', 'long');
+		const useShortForm = operatorFormat === 'short';
+		const symbolicOperators = findSymbolicOperatorsInIf(text, useShortForm);
+		console.log('Operadores simbólicos encontrados:', symbolicOperators.length);
+
+		for (const op of symbolicOperators) {
+			const range = new vscode.Range(
+				op.line,
+				op.column,
+				op.line,
+				op.column + op.length
+			);
+
+			const diagnostic = new vscode.Diagnostic(
+				range,
+				`Use '${op.replacement}' em vez de '${op.operator}' em condições COBOL`,
+				vscode.DiagnosticSeverity.Warning
+			);
+			diagnostic.code = 'symbolic-operator';
+			diagnostic.source = 'zCobol Validation';
+			// Armazena o operador e replacement no diagnostic para usar nas code actions
+			diagnostic.relatedInformation = [{
+				location: new vscode.Location(document.uri, range),
+				message: `${op.operator}:${op.replacement}`
+			}];
+
+			diagnostics.push(diagnostic);
+		}
+	}
+
 	// Validação de valores hardcoded
 	const enableHardcodedCheck = config.get('enableHardcodedCheck', true);
 	if (enableHardcodedCheck) {
@@ -914,6 +1183,86 @@ class CobolCodeActionProvider {
 
 				commentIf.edit.replace(document.uri, line.range, newLineText);
 				codeActions.push(commentIf);
+			}
+
+			// Code actions para IFs sem ELSE
+			if (diagnostic.source === 'zCobol Validation' && diagnostic.code === 'if-without-else') {
+				const line = document.lineAt(diagnostic.range.start.line);
+				const lineText = line.text;
+				const indentation = lineText.substring(0, lineText.search(/\S|$/));
+
+				// Ação 1: Adicionar ELSE com CONTINUE
+				const addElseContinue = new vscode.CodeAction('Adicionar ELSE com CONTINUE', vscode.CodeActionKind.QuickFix);
+				addElseContinue.diagnostics = [diagnostic];
+				addElseContinue.edit = new vscode.WorkspaceEdit();
+
+				// Encontra o END-IF correspondente
+				let endIfLine = -1;
+				let nestingLevel = 1;
+				for (let j = diagnostic.range.start.line + 1; j < document.lineCount; j++) {
+					const nextLine = document.lineAt(j);
+					const content = nextLine.text.substring(6);
+
+					// Ignora comentários
+					if (nextLine.text.length > 6 && nextLine.text[6] === '*') {
+						continue;
+					}
+
+					// Detecta IF aninhado
+					if (/^\s*IF\s+/i.test(content) && !/^\s*END-IF/i.test(content)) {
+						nestingLevel++;
+					}
+
+					// Detecta END-IF
+					if (/^\s*END-IF/i.test(content)) {
+						nestingLevel--;
+						if (nestingLevel === 0) {
+							endIfLine = j;
+							break;
+						}
+					}
+				}
+
+				if (endIfLine !== -1) {
+					// Insere ELSE com CONTINUE antes do END-IF
+					addElseContinue.edit.insert(
+						document.uri,
+						new vscode.Position(endIfLine, 0),
+						`${indentation}ELSE\n${indentation}   CONTINUE\n`
+					);
+					codeActions.push(addElseContinue);
+
+					// Ação 2: Adicionar apenas ELSE
+					const addElse = new vscode.CodeAction('Adicionar ELSE', vscode.CodeActionKind.QuickFix);
+					addElse.diagnostics = [diagnostic];
+					addElse.edit = new vscode.WorkspaceEdit();
+					addElse.edit.insert(
+						document.uri,
+						new vscode.Position(endIfLine, 0),
+						`${indentation}ELSE\n${indentation}   \n`
+					);
+					codeActions.push(addElse);
+				}
+			}
+
+			// Code actions para operadores simbólicos
+			if (diagnostic.source === 'zCobol Validation' && diagnostic.code === 'symbolic-operator') {
+				// Extrai o operador e replacement do diagnostic
+				// let operator = '';
+				let replacement = '';
+				if (diagnostic.relatedInformation && diagnostic.relatedInformation.length > 0) {
+					const info = diagnostic.relatedInformation[0].message;
+					const parts = info.split(':');
+					// operator = parts[0];
+					replacement = parts[1];
+				}
+
+				// Ação: Substituir pelo operador COBOL
+				const replaceOperator = new vscode.CodeAction(`Substituir por '${replacement}'`, vscode.CodeActionKind.QuickFix);
+				replaceOperator.diagnostics = [diagnostic];
+				replaceOperator.edit = new vscode.WorkspaceEdit();
+				replaceOperator.edit.replace(document.uri, diagnostic.range, replacement);
+				codeActions.push(replaceOperator);
 			}
 
 			// Code actions para valores hardcoded
@@ -1190,7 +1539,10 @@ function activate(context) {
 			    event.affectsConfiguration('zcobol-validation.enableUnprotectedDisplayCheck') ||
 			    event.affectsConfiguration('zcobol-validation.enableGoToCheck') ||
 			    event.affectsConfiguration('zcobol-validation.enableUnmatchedIfCheck') ||
-			    event.affectsConfiguration('zcobol-validation.enableHardcodedCheck')) {
+			    event.affectsConfiguration('zcobol-validation.enableIfWithoutElseCheck') ||
+			    event.affectsConfiguration('zcobol-validation.enableHardcodedCheck') ||
+			    event.affectsConfiguration('zcobol-validation.enableSymbolicOperatorCheck') ||
+			    event.affectsConfiguration('zcobol-validation.operatorFormat')) {
 				console.log('Configuração alterada - revalidando todos os documentos');
 				vscode.workspace.textDocuments.forEach(document => {
 					validateCobolDocument(document);
