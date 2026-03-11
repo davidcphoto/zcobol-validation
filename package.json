@@ -2,12 +2,34 @@
   "name": "zcobol-validation",
   "displayName": "zCobol Validation",
   "description": "Cobol validations",
-  "version": "0.0.1",
+  "publisher": "DavidCanto",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/davidcphoto/zcobol-validation.git"
+  },
+  "version": "1.0.0",
+  "icon": "icon.svg",
+  "keywords": [
+    "cobol",
+    "mainframe",
+    "validation",
+    "linter",
+    "code quality",
+    "static analysis",
+    "best practices",
+    "legacy code",
+    "zowe",
+    "cics",
+    "db2",
+    "sql cursor",
+    "file operations"
+  ],
   "engines": {
     "vscode": "^1.75.0"
   },
   "categories": [
-    "Other"
+    "Linters",
+    "Programming Languages"
   ],
   "activationEvents": [
     "onLanguage:cobol",
@@ -22,11 +44,11 @@
     "commands": [
       {
         "command": "zcobol-validation.wrapWithIf",
-        "title": "Envolver com IF...END-IF"
+        "title": "Wrap with IF...END-IF"
       },
       {
         "command": "zcobol-validation.createConstant",
-        "title": "Criar constante"
+        "title": "Create constant"
       }
     ],
     "configuration": {
@@ -35,87 +57,87 @@
         "zcobol-validation.enableUnusedVariableCheck": {
           "type": "boolean",
           "default": true,
-          "description": "Ativar validação de variáveis não utilizadas"
+          "description": "Enable unused variable validation"
         },
         "zcobol-validation.enableUnprotectedDisplayCheck": {
           "type": "boolean",
           "default": true,
-          "description": "Ativar validação de displays não protegidos (fora de blocos IF)"
+          "description": "Enable unprotected display validation (outside IF blocks)"
         },
         "zcobol-validation.enableGoToCheck": {
           "type": "boolean",
           "default": true,
-          "description": "Ativar validação de comandos GO TO"
+          "description": "Enable GO TO command validation"
         },
         "zcobol-validation.enableUnmatchedIfCheck": {
           "type": "boolean",
           "default": true,
-          "description": "Ativar validação de IFs sem END-IF correspondente"
+          "description": "Enable IF without matching END-IF validation"
         },
         "zcobol-validation.enableIfWithoutElseCheck": {
           "type": "boolean",
           "default": false,
-          "description": "Ativar validação de IFs sem ELSE (desativado por padrão)"
+          "description": "Enable IF without ELSE validation (disabled by default)"
         },
         "zcobol-validation.enableEvaluateWithoutWhenOtherCheck": {
           "type": "boolean",
           "default": false,
-          "description": "Ativar validação de EVALUATE sem WHEN OTHER (desativado por padrão)"
+          "description": "Enable EVALUATE without WHEN OTHER validation (disabled by default)"
         },
         "zcobol-validation.enableHardcodedCheck": {
           "type": "boolean",
           "default": true,
-          "description": "Ativar validação de valores hardcoded (strings e números literais)"
+          "description": "Enable hardcoded value validation (strings and number literals)"
         },
         "zcobol-validation.enableLowerCaseCheck": {
           "type": "boolean",
           "default": false,
-          "description": "Ativar validação de código em minúsculas - COBOL deve ser escrito em maiúsculas (desativado por padrão)"
+          "description": "Enable lowercase code validation - COBOL should be written in uppercase (disabled by default)"
         },
         "zcobol-validation.enableSymbolicOperatorCheck": {
           "type": "boolean",
           "default": true,
-          "description": "Ativar validação de operadores simbólicos (<, >, =) em condições IF, sugerindo LESS THAN, GREATER THAN, EQUAL"
+          "description": "Enable symbolic operator validation (<, >, =) in IF conditions, suggesting LESS THAN, GREATER THAN, EQUAL"
         },
         "zcobol-validation.operatorFormat": {
           "type": "string",
           "default": "long",
           "enum": ["long", "short"],
           "enumDescriptions": [
-            "LESS/GREATER THAN OR EQUAL (forma longa)",
-            "LESS/GREATER OR EQUAL (forma curta)"
+            "LESS/GREATER THAN OR EQUAL (long form)",
+            "LESS/GREATER OR EQUAL (short form)"
           ],
-          "description": "Formato dos operadores compostos nas sugestões de validação"
+          "description": "Format of compound operators in validation suggestions"
         },
         "zcobol-validation.enableHardcodedInString": {
           "type": "boolean",
           "default": false,
-          "description": "Ativar validação de valores hardcoded dentro de funções STRING e UNSTRING"
+          "description": "Enable hardcoded value validation inside STRING and UNSTRING functions"
         },
         "zcobol-validation.enableHardcodedInDisplay": {
           "type": "boolean",
           "default": false,
-          "description": "Ativar validação de valores hardcoded dentro de comandos DISPLAY"
+          "description": "Enable hardcoded value validation inside DISPLAY commands"
         },
         "zcobol-validation.defaultIfCondition": {
           "type": "string",
           "default": "",
-          "description": "Condição padrão para blocos IF (exemplo: '1 = 1' ou 'WS-FLAG = 'S'')"
+          "description": "Default condition for IF blocks (example: '1 = 1' or 'WS-FLAG = 'S'')"
         },
         "zcobol-validation.constantPrefix": {
           "type": "string",
           "default": "con-",
-          "description": "Prefixo usado para gerar nomes de constantes (ex: 'con-' gera con-valor)"
+          "description": "Prefix used to generate constant names (e.g., 'con-' generates con-value)"
         },
         "zcobol-validation.enableFileOperationsCheck": {
           "type": "boolean",
           "default": true,
-          "description": "Ativar validação de operações de ficheiro (OPEN, CLOSE, READ/WRITE)"
+          "description": "Enable file operations validation (OPEN, CLOSE, READ/WRITE)"
         },
         "zcobol-validation.enableCursorOperationsCheck": {
           "type": "boolean",
           "default": true,
-          "description": "Ativar validação de operações de cursor (OPEN, FETCH, CLOSE)"
+          "description": "Enable cursor operations validation (OPEN, FETCH, CLOSE)"
         }
       }
     }

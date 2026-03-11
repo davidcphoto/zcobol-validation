@@ -2,7 +2,7 @@
 // Import the module and reference it with the alias vscode in your code below
 const vscode = require('vscode');
 
-// Diagnostic collection para warnings de variáveis não utilizadas
+// Diagnostic collection for unused variable warnings
 let diagnosticCollection;
 
 /**
@@ -1330,7 +1330,7 @@ function validateCobolDocument(document) {
 
 				const diagnostic = new vscode.Diagnostic(
 					range,
-					`A variável '${varName}' está declarada mas não está a ser utilizada`,
+					`Variable '${varName}' is declared but not used`,
 					vscode.DiagnosticSeverity.Warning
 				);
 				diagnostic.code = 'unused-variable';
@@ -1357,7 +1357,7 @@ function validateCobolDocument(document) {
 
 			const diagnostic = new vscode.Diagnostic(
 				range,
-				'DISPLAY não protegido - considere adicionar dentro de um bloco IF',
+				'Unprotected DISPLAY - consider adding inside an IF block',
 				vscode.DiagnosticSeverity.Warning
 			);
 			diagnostic.code = 'unprotected-display';
@@ -1383,7 +1383,7 @@ function validateCobolDocument(document) {
 
 			const diagnostic = new vscode.Diagnostic(
 				range,
-				`Comando GO TO detectado - considere refatorar usando PERFORM`,
+				`GO TO command detected - consider refactoring using PERFORM`,
 				vscode.DiagnosticSeverity.Warning
 			);
 			diagnostic.code = 'goto-statement';
@@ -1409,7 +1409,7 @@ function validateCobolDocument(document) {
 
 			const diagnostic = new vscode.Diagnostic(
 				range,
-				`IF sem END-IF correspondente - verifique a estrutura do bloco`,
+				`IF without matching END-IF - check block structure`,
 				vscode.DiagnosticSeverity.Error
 			);
 			diagnostic.code = 'unmatched-if';
@@ -1435,7 +1435,7 @@ function validateCobolDocument(document) {
 
 			const diagnostic = new vscode.Diagnostic(
 				range,
-				`IF sem ELSE - considere adicionar um bloco ELSE para garantir cobertura completa`,
+				`IF without ELSE - consider adding an ELSE block to ensure complete coverage`,
 				vscode.DiagnosticSeverity.Warning
 			);
 			diagnostic.code = 'if-without-else';
@@ -1461,7 +1461,7 @@ function validateCobolDocument(document) {
 
 			const diagnostic = new vscode.Diagnostic(
 				range,
-				`EVALUATE sem WHEN OTHER - considere adicionar um bloco WHEN OTHER para garantir cobertura completa`,
+				`EVALUATE without WHEN OTHER - consider adding a WHEN OTHER block to ensure complete coverage`,
 				vscode.DiagnosticSeverity.Warning
 			);
 			diagnostic.code = 'evaluate-without-when-other';
@@ -1522,7 +1522,7 @@ function validateCobolDocument(document) {
 
 			const diagnostic = new vscode.Diagnostic(
 				range,
-				`Valor hardcoded detectado (${hardcoded.value}) - considere criar uma constante`,
+				`Hardcoded value detected (${hardcoded.value}) - consider creating a constant`,
 				vscode.DiagnosticSeverity.Warning
 			);
 			diagnostic.code = 'hardcoded-value';
@@ -1553,7 +1553,7 @@ function validateCobolDocument(document) {
 
 			const diagnostic = new vscode.Diagnostic(
 				range,
-				`Código em minúsculas detectado: '${lowerCase.word}' - COBOL deve ser escrito em maiúsculas`,
+				`Lowercase code detected: '${lowerCase.word}' - COBOL should be written in uppercase`,
 				vscode.DiagnosticSeverity.Warning
 			);
 			diagnostic.code = 'lower-case-code';
@@ -1572,7 +1572,7 @@ function validateCobolDocument(document) {
 	const enableFileOperationsCheck = config.get('enableFileOperationsCheck', true);
 	if (enableFileOperationsCheck) {
 		const filesWithoutOps = findFilesWithoutOperations(text);
-		console.log('Ficheiros sem operações completas:', filesWithoutOps.length);
+		console.log('Files without complete operations:', filesWithoutOps.length);
 
 		for (const file of filesWithoutOps) {
 			const range = new vscode.Range(
@@ -1585,7 +1585,7 @@ function validateCobolDocument(document) {
 			const missingOps = file.missing.join(', ');
 			const diagnostic = new vscode.Diagnostic(
 				range,
-				`Ficheiro '${file.fileName}' declarado mas falta(m): ${missingOps}`,
+				`File '${file.fileName}' declared but missing: ${missingOps}`,
 				vscode.DiagnosticSeverity.Warning
 			);
 			diagnostic.code = 'missing-file-operations';
@@ -1599,7 +1599,7 @@ function validateCobolDocument(document) {
 	const enableCursorOperationsCheck = config.get('enableCursorOperationsCheck', true);
 	if (enableCursorOperationsCheck) {
 		const cursorsWithoutOps = findCursorsWithoutOperations(text);
-		console.log('Cursores sem operações completas:', cursorsWithoutOps.length);
+		console.log('Cursors without complete operations:', cursorsWithoutOps.length);
 
 		for (const cursor of cursorsWithoutOps) {
 			const range = new vscode.Range(
@@ -1612,7 +1612,7 @@ function validateCobolDocument(document) {
 			const missingOps = cursor.missing.join(', ');
 			const diagnostic = new vscode.Diagnostic(
 				range,
-				`Cursor '${cursor.cursorName}' declarado mas falta(m): ${missingOps}`,
+				`Cursor '${cursor.cursorName}' declared but missing: ${missingOps}`,
 				vscode.DiagnosticSeverity.Warning
 			);
 			diagnostic.code = 'missing-cursor-operations';
@@ -1636,8 +1636,8 @@ class CobolCodeActionProvider {
 		// Procura por diagnósticos de variáveis não utilizadas na posição atual
 		for (const diagnostic of context.diagnostics) {
 			if (diagnostic.source === 'zCobol Validation' && diagnostic.code === 'unused-variable') {
-				// Ação 1: Eliminar a linha
-				const deleteLine = new vscode.CodeAction('Eliminar linha', vscode.CodeActionKind.QuickFix);
+				// Action 1: Delete line
+				const deleteLine = new vscode.CodeAction('Delete line', vscode.CodeActionKind.QuickFix);
 				deleteLine.diagnostics = [diagnostic];
 				deleteLine.edit = new vscode.WorkspaceEdit();
 
@@ -1650,8 +1650,8 @@ class CobolCodeActionProvider {
 				deleteLine.edit.delete(document.uri, deleteRange);
 				codeActions.push(deleteLine);
 
-				// Ação 2: Comentar a linha (asterisco na coluna 7)
-				const commentLine = new vscode.CodeAction('Comentar linha (asterisco)', vscode.CodeActionKind.QuickFix);
+				// Action 2: Comment line (asterisk in column 7)
+				const commentLine = new vscode.CodeAction('Comment line (asterisk)', vscode.CodeActionKind.QuickFix);
 				commentLine.diagnostics = [diagnostic];
 				commentLine.edit = new vscode.WorkspaceEdit();
 
@@ -1680,20 +1680,20 @@ class CobolCodeActionProvider {
 				const line = document.lineAt(diagnostic.range.start.line);
 				const lineText = line.text;
 
-				// Ação 1: Envolver com IF e END-IF
-				const wrapWithIf = new vscode.CodeAction('Envolver com IF...END-IF', vscode.CodeActionKind.QuickFix);
+				// Action 1: Wrap with IF and END-IF
+				const wrapWithIf = new vscode.CodeAction('Wrap with IF...END-IF', vscode.CodeActionKind.QuickFix);
 				wrapWithIf.diagnostics = [diagnostic];
 
-				// Usar um command para permitir posicionamento do cursor
+				// Use a command to allow cursor positioning
 				wrapWithIf.command = {
-					title: 'Envolver com IF...END-IF',
+					title: 'Wrap with IF...END-IF',
 					command: 'zcobol-validation.wrapWithIf',
 					arguments: [document, diagnostic.range.start.line]
 				};
 				codeActions.push(wrapWithIf);
 
-				// Ação 2: Comentar a linha
-				const commentDisplay = new vscode.CodeAction('Comentar linha (asterisco)', vscode.CodeActionKind.QuickFix);
+				// Action 2: Comment line
+				const commentDisplay = new vscode.CodeAction('Comment line (asterisk)', vscode.CodeActionKind.QuickFix);
 				commentDisplay.diagnostics = [diagnostic];
 				commentDisplay.edit = new vscode.WorkspaceEdit();
 
@@ -1707,8 +1707,8 @@ class CobolCodeActionProvider {
 				commentDisplay.edit.replace(document.uri, line.range, newLineText);
 				codeActions.push(commentDisplay);
 
-				// Ação 3: Eliminar a linha
-				const deleteDisplay = new vscode.CodeAction('Eliminar linha', vscode.CodeActionKind.QuickFix);
+				// Action 3: Delete line
+				const deleteDisplay = new vscode.CodeAction('Delete line', vscode.CodeActionKind.QuickFix);
 				deleteDisplay.diagnostics = [diagnostic];
 				deleteDisplay.edit = new vscode.WorkspaceEdit();
 
@@ -1727,8 +1727,8 @@ class CobolCodeActionProvider {
 				const line = document.lineAt(diagnostic.range.start.line);
 				const lineText = line.text;
 
-				// Ação 1: Comentar a linha
-				const commentGoTo = new vscode.CodeAction('Comentar linha (asterisco)', vscode.CodeActionKind.QuickFix);
+				// Action 1: Comment line
+				const commentGoTo = new vscode.CodeAction('Comment line (asterisk)', vscode.CodeActionKind.QuickFix);
 				commentGoTo.diagnostics = [diagnostic];
 				commentGoTo.edit = new vscode.WorkspaceEdit();
 
@@ -1743,7 +1743,7 @@ class CobolCodeActionProvider {
 				codeActions.push(commentGoTo);
 
 				// Ação 2: Eliminar a linha
-				const deleteGoTo = new vscode.CodeAction('Eliminar linha', vscode.CodeActionKind.QuickFix);
+				const deleteGoTo = new vscode.CodeAction('Delete line', vscode.CodeActionKind.QuickFix);
 				deleteGoTo.diagnostics = [diagnostic];
 				deleteGoTo.edit = new vscode.WorkspaceEdit();
 
@@ -1764,7 +1764,7 @@ class CobolCodeActionProvider {
 				const indentation = lineText.substring(0, lineText.search(/\S|$/));
 
 				// Ação 1: Adicionar END-IF
-				const addEndIf = new vscode.CodeAction('Adicionar END-IF', vscode.CodeActionKind.QuickFix);
+				const addEndIf = new vscode.CodeAction('Add END-IF', vscode.CodeActionKind.QuickFix);
 				addEndIf.diagnostics = [diagnostic];
 				addEndIf.edit = new vscode.WorkspaceEdit();
 
@@ -1787,7 +1787,7 @@ class CobolCodeActionProvider {
 				codeActions.push(addEndIf);
 
 				// Ação 2: Comentar a linha
-				const commentIf = new vscode.CodeAction('Comentar linha (asterisco)', vscode.CodeActionKind.QuickFix);
+				const commentIf = new vscode.CodeAction('Comment line (asterisk)', vscode.CodeActionKind.QuickFix);
 				commentIf.diagnostics = [diagnostic];
 				commentIf.edit = new vscode.WorkspaceEdit();
 
@@ -1809,7 +1809,7 @@ class CobolCodeActionProvider {
 				const indentation = lineText.substring(0, lineText.search(/\S|$/));
 
 				// Ação 1: Adicionar ELSE com CONTINUE
-				const addElseContinue = new vscode.CodeAction('Adicionar ELSE com CONTINUE', vscode.CodeActionKind.QuickFix);
+				const addElseContinue = new vscode.CodeAction('Add ELSE with CONTINUE', vscode.CodeActionKind.QuickFix);
 				addElseContinue.diagnostics = [diagnostic];
 				addElseContinue.edit = new vscode.WorkspaceEdit();
 
@@ -1850,7 +1850,7 @@ class CobolCodeActionProvider {
 					codeActions.push(addElseContinue);
 
 					// Ação 2: Adicionar apenas ELSE
-					const addElse = new vscode.CodeAction('Adicionar ELSE', vscode.CodeActionKind.QuickFix);
+					const addElse = new vscode.CodeAction('Add ELSE', vscode.CodeActionKind.QuickFix);
 					addElse.diagnostics = [diagnostic];
 					addElse.edit = new vscode.WorkspaceEdit();
 					addElse.edit.insert(
@@ -1869,7 +1869,7 @@ class CobolCodeActionProvider {
 				const indentation = lineText.substring(0, lineText.search(/\S|$/));
 
 				// Ação 1: Adicionar WHEN OTHER com CONTINUE
-				const addWhenOtherContinue = new vscode.CodeAction('Adicionar WHEN OTHER com CONTINUE', vscode.CodeActionKind.QuickFix);
+				const addWhenOtherContinue = new vscode.CodeAction('Add WHEN OTHER with CONTINUE', vscode.CodeActionKind.QuickFix);
 				addWhenOtherContinue.diagnostics = [diagnostic];
 				addWhenOtherContinue.edit = new vscode.WorkspaceEdit();
 
@@ -1910,7 +1910,7 @@ class CobolCodeActionProvider {
 					codeActions.push(addWhenOtherContinue);
 
 					// Ação 2: Adicionar apenas WHEN OTHER
-					const addWhenOther = new vscode.CodeAction('Adicionar WHEN OTHER', vscode.CodeActionKind.QuickFix);
+					const addWhenOther = new vscode.CodeAction('Add WHEN OTHER', vscode.CodeActionKind.QuickFix);
 					addWhenOther.diagnostics = [diagnostic];
 					addWhenOther.edit = new vscode.WorkspaceEdit();
 					addWhenOther.edit.insert(
@@ -1954,11 +1954,11 @@ class CobolCodeActionProvider {
 					hardcodedValue = parts.slice(1).join(':');
 				}
 
-				// Usa um command para permitir input do usuário para o nome da constante
-				const createConstant = new vscode.CodeAction('Criar constante', vscode.CodeActionKind.QuickFix);
+			// Use a command to allow user input for the constant name
+				const createConstant = new vscode.CodeAction('Create constant', vscode.CodeActionKind.QuickFix);
 				createConstant.diagnostics = [diagnostic];
 				createConstant.command = {
-					title: 'Criar constante',
+					title: 'Create constant',
 					command: 'zcobol-validation.createConstant',
 					arguments: [document, diagnostic.range, hardcodedValue, valueType]
 				};
@@ -2004,7 +2004,7 @@ function activate(context) {
 	diagnosticCollection = vscode.languages.createDiagnosticCollection('cobol');
 	context.subscriptions.push(diagnosticCollection);
 
-	// Regista o provider de code actions para ficheiros COBOL
+	// Register the code actions provider for COBOL files
 	const cobolSelector = [
 		{ scheme: 'file', language: 'cobol' },
 		{ scheme: 'file', pattern: '**/*.{cbl,cob,cobol,cpy}' }
@@ -2017,7 +2017,7 @@ function activate(context) {
 		)
 	);
 
-	// Regista o comando para envolver com IF...END-IF
+	// Register the command to wrap with IF...END-IF
 	context.subscriptions.push(
 		vscode.commands.registerCommand('zcobol-validation.wrapWithIf', async (document, lineNumber) => {
 			const editor = vscode.window.activeTextEditor;
@@ -2029,7 +2029,7 @@ function activate(context) {
 			const lineText = line.text;
 			const indentation = lineText.substring(0, lineText.search(/\S|$/));
 
-			// Obtém a condição padrão das configurações
+			// Get default condition from settings
 			const config = vscode.workspace.getConfiguration('zcobol-validation');
 			const defaultCondition = config.get('defaultIfCondition', '');
 
@@ -2056,12 +2056,12 @@ function activate(context) {
 					`${indentation}END-IF.\n`);
 			});
 
-			// Posiciona o cursor após "IF " na linha do IF para preencher a condição
+			// Position cursor after "IF " in the IF line to fill in the condition
 			const newPosition = new vscode.Position(lineNumber, indentation.length + 3);
 			editor.selection = new vscode.Selection(newPosition, newPosition);
 
-			// Insere um snippet com a condição padrão ou placeholder
-			const snippetText = defaultCondition ? `\${1:${defaultCondition}}` : '${1:condição}';
+			// Insert a snippet with default condition or placeholder
+			const snippetText = defaultCondition ? `\${1:${defaultCondition}}` : '${1:condition}';
 			await editor.insertSnippet(
 				new vscode.SnippetString(snippetText),
 				newPosition
@@ -2069,7 +2069,7 @@ function activate(context) {
 		})
 	);
 
-	// Regista o comando para criar constante
+	// Register the command to create constant
 	context.subscriptions.push(
 		vscode.commands.registerCommand('zcobol-validation.createConstant', async (document, range, hardcodedValue, valueType) => {
 			const editor = vscode.window.activeTextEditor;
@@ -2077,7 +2077,7 @@ function activate(context) {
 				return;
 			}
 
-			// Procura se já existe uma constante com o mesmo valor
+			// Check if a constant with the same value already exists
 			let existingConstant = null;
 			let workingStorageLine = -1;
 		let lastCompleteVarLine = -1;
@@ -2112,7 +2112,7 @@ function activate(context) {
 					// Compara o valor (remove espaços extras)
 					if (constValue === hardcodedValue.trim()) {
 						existingConstant = constName;
-						console.log(`Constante existente encontrada: ${constName} com valor ${constValue}`);
+						console.log(`Existing constant found: ${constName} with value ${constValue}`);
 						break;
 					}
 				}
@@ -2123,21 +2123,21 @@ function activate(context) {
 			}
 		}
 
-		// Se encontrou uma constante existente, usa essa
+		// If found an existing constant, use it
 		if (existingConstant) {
 			const useExisting = await vscode.window.showInformationMessage(
-				`Já existe a constante '${existingConstant}' com este valor. Deseja usá-la?`,
-				'Sim', 'Não, criar nova'
+				`Constant '${existingConstant}' already exists with this value. Do you want to use it?`,
+				'Yes', 'No, create new'
 			);
 
-			if (useExisting === 'Sim') {
-				// Substitui o valor hardcoded pela constante existente
+			if (useExisting === 'Yes') {
+				// Replace the hardcoded value with the existing constant
 				await editor.edit(editBuilder => {
 					editBuilder.replace(range, existingConstant);
 				});
 				return;
 			}
-			// Se escolheu "Não, criar nova", continua para criar uma nova constante
+			// If chose "No, create new", continue to create a new constant
 		}
 
 		// Gera um nome padrão baseado no valor e no prefixo configurado
@@ -2157,28 +2157,28 @@ function activate(context) {
 		let sanitizedValue = valueForName.replace(/[^A-Z0-9]/gi, '-').substring(0, 25);
 		const defaultName = (prefix + sanitizedValue).toUpperCase();
 
-		// Pede ao usuário o nome da constante com sugestão padrão
+		// Ask user for the constant name with default suggestion
 		const constantName = await vscode.window.showInputBox({
-			prompt: 'Nome da constante',
+			prompt: 'Constant name',
 			value: defaultName,
 			validateInput: (value) => {
 				if (!value || value.trim().length === 0) {
-					return 'O nome da constante não pode estar vazio';
+					return 'Constant name cannot be empty';
 				}
 				if (!/^[A-Z][A-Z0-9-]*$/i.test(value)) {
-					return 'O nome deve começar com letra e conter apenas letras, números e hífens';
+					return 'Name must start with a letter and contain only letters, numbers and hyphens';
 				}
 			return null;
 		}
 	});
 
 	if (!constantName) {
-		return; // Usuário cancelou
+		return; // User cancelled
 	}
 
-	// Verifica se encontrou WORKING-STORAGE SECTION
+	// Check if WORKING-STORAGE SECTION was found
 	if (workingStorageLine < 0) {
-		vscode.window.showErrorMessage('WORKING-STORAGE SECTION não encontrada no documento.');
+		vscode.window.showErrorMessage('WORKING-STORAGE SECTION not found in document.');
 		return;
 	}
 
@@ -2194,26 +2194,26 @@ function activate(context) {
 		picClause = `PIC 9(${valueLength.toString().padStart(2, '0')})`;
 	}
 
-	// Insere a declaração da constante na WORKING-STORAGE SECTION
+	// Insert the constant declaration in WORKING-STORAGE SECTION
 	await editor.edit(editBuilder => {
 		const insertLine = lastCompleteVarLine >= 0 ? lastCompleteVarLine + 1 : workingStorageLine + 1;
 		const constantDecl = `       01  ${constantName.padEnd(28)} ${picClause} VALUE ${valueClause}.\n`;
 		editBuilder.insert(new vscode.Position(insertLine, 0), constantDecl);
 
-		// Substitui o valor hardcoded pelo nome da constante
+		// Replace the hardcoded value with the constant name
 		editBuilder.replace(range, constantName);
 	});
 })
 	);
 
-	// Valida quando o documento é modificado
+	// Validate when document is modified
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeTextDocument(event => {
 			validateCobolDocument(event.document);
 		})
 	);
 
-	// Valida quando muda o editor ativo
+	// Validate when active editor changes
 	context.subscriptions.push(
 		vscode.window.onDidChangeActiveTextEditor(editor => {
 			if (editor) {
@@ -2222,12 +2222,12 @@ function activate(context) {
 		})
 	);
 
-	// Valida todos os documentos abertos
+	// Validate all open documents
 	vscode.workspace.textDocuments.forEach(document => {
 		validateCobolDocument(document);
 	});
 
-	// Re-valida todos os documentos quando a configuração muda
+	// Re-validate all documents when configuration changes
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration(event => {
 			if (event.affectsConfiguration('zcobol-validation.enableUnusedVariableCheck') ||
@@ -2242,7 +2242,7 @@ function activate(context) {
 			    event.affectsConfiguration('zcobol-validation.enableFileOperationsCheck') ||
 			    event.affectsConfiguration('zcobol-validation.enableCursorOperationsCheck') ||
 			    event.affectsConfiguration('zcobol-validation.operatorFormat')) {
-				console.log('Configuração alterada - revalidando todos os documentos');
+				console.log('Configuration changed - revalidating all documents');
 				vscode.workspace.textDocuments.forEach(document => {
 					validateCobolDocument(document);
 				});
