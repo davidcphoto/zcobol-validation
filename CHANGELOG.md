@@ -4,6 +4,24 @@ All notable changes to the "zcobol-validation" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [1.1.0] - 2026-03-13
+
+### Added
+- **Level 88 Condition Validation**: Detects unused level 88 condition names
+  - Validates that declared 88-level conditions are used in the code
+  - Quick Fixes: Delete line or comment with asterisk
+  - Can be enabled/disabled via `enableUnusedLevel88Check` setting
+
+### Improved
+- **Enhanced Unused Variable Detection**: Now considers level 88 conditions when checking variable usage
+  - Variables with level 88 conditions are considered "used" if any of their conditions are used
+  - Example: A variable with `88 STATUS-OK VALUE 'Y'` is considered used if `STATUS-OK` appears in code
+
+- **FILLER Variables Handling**: Improved handling of FILLER variables
+  - FILLER variables are now completely ignored in unused variable validation
+  - Level 88 conditions associated with FILLER variables are also ignored
+  - Applies to both `FILLER` and `FILLER-*` patterns
+
 ## [1.0.0] - 2026-03-11
 
 ### Added

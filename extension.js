@@ -62,9 +62,176 @@ function isGroupVariable(lines, varLine, varLevel) {
 }
 
 /**
- * Extrai variáveis declaradas no código COBOL
+ * Extrai os níveis 88 associados a uma variável
+ * @param {string[]} lines
+ * @param {number} varLine
+ * @param {number} varLevel
+ * @returns {string[]}
+ */
+function extractLevel88Conditions(lines, varLine, varLevel) {
+	const conditions = [];
+
+	// Procura níveis 88 nas linhas seguintes à declaração da variável
+	for (let i = varLine + 1; i < lines.length; i++) {
+		const line = lines[i];
+
+		// Verifica se é uma declaração de nível
+		const levelMatch = line.match(/^\s{6,}\s*(01|0[2-9]|[1-4][0-9]|77|88)\s+([A-Z0-9][\w-]*)/i);
+		if (levelMatch) {
+			const level = parseInt(levelMatch[1]);
+			const name = levelMatch[2].toUpperCase();
+
+			// Se é nível 88, adiciona à lista
+			if (level === 88) {
+				conditions.push(name);
+				console.log(`Nível 88 encontrado: ${name} associado à variável na linha ${varLine}`);
+			}
+			// Se é um nível igual ou menor que a variável, já saímos do escopo da variável
+			else if (level <= varLevel) {
+				break;
+			}
+		}
+
+		// Se encontrar outra divisão, para
+		if (/^\s*PROCEDURE\s+DIVISION/i.test(line)) {
+			break;
+		}
+	}
+
+	return conditions;
+}
+
+/**
+ * Extrai todos os níveis 88 declarados no código COBOL
  * @param {string} text
  * @returns {Map<string, {line: number, column: number, isLinkage: boolean}>}
+ */
+function extractLevel88Declarations(text) {
+	const level88s = new Map();
+	const lines = text.split('\n');
+
+	let inDataDivision = false;
+	let inLinkageSection = false;
+	let inProcedureDivision = false;
+	let lastParentVar = null; // Rastreia a última variável pai (para verificar se é FILLER)
+	let lastParentLevel = 0;
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+
+		// Detecta início da DATA DIVISION
+		if (/^\s*DATA\s+DIVISION/i.test(line)) {
+			inDataDivision = true;
+			inProcedureDivision = false;
+			continue;
+		}
+
+		// Detecta início da LINKAGE SECTION
+		if (/^\s*LINKAGE\s+SECTION/i.test(line)) {
+			inLinkageSection = true;
+			continue;
+		}
+
+		// Detecta início de outras seções (sai da LINKAGE SECTION)
+		if (inDataDivision && /^\s*(WORKING-STORAGE|FILE|LOCAL-STORAGE|SCREEN|REPORT)\s+SECTION/i.test(line)) {
+			inLinkageSection = false;
+			continue;
+		}
+
+		// Detecta início da PROCEDURE DIVISION
+		if (/^\s*PROCEDURE\s+DIVISION/i.test(line)) {
+			inDataDivision = false;
+			inLinkageSection = false;
+			inProcedureDivision = true;
+			continue;
+		}
+
+		// Se estamos na DATA DIVISION, procura declarações de nível 88
+		if (inDataDivision && !inProcedureDivision) {
+			// Verifica se é uma declaração de variável (não nível 88)
+			const varMatch = line.match(/^\s{6,}\s*(01|0[2-9]|[1-4][0-9]|77)\s+([A-Z0-9][\w-]*)/i);
+			if (varMatch) {
+				lastParentLevel = parseInt(varMatch[1]);
+				lastParentVar = varMatch[2].toUpperCase();
+				console.log(`Variável pai rastreada: ${lastParentVar} (nível ${lastParentLevel})`);
+			}
+
+			// Procura declarações de nível 88
+			const level88Match = line.match(/^\s{6,}\s*88\s+([A-Z0-9][\w-]*)/i);
+			if (level88Match) {
+				const conditionName = level88Match[1].toUpperCase();
+
+				// Ignora níveis 88 de variáveis FILLER
+				if (lastParentVar && (lastParentVar === 'FILLER' || lastParentVar.startsWith('FILLER-'))) {
+					console.log(`Nível 88 ${conditionName} ignorado (associado a FILLER: ${lastParentVar})`);
+					continue;
+				}
+
+				const column = line.indexOf(level88Match[1]);
+
+				level88s.set(conditionName, {
+					line: i,
+					column: column,
+					isLinkage: inLinkageSection
+				});
+				console.log(`Nível 88 declarado: ${conditionName} na linha ${i}`);
+			}
+		}
+	}
+
+	return level88s;
+}
+
+/**
+ * Verifica se um nível 88 é utilizado no código
+ * @param {string} text
+ * @param {string} conditionName
+ * @returns {boolean}
+ */
+function isLevel88Used(text, conditionName) {
+	const lines = text.split('\n');
+	let inProcedureDivision = false;
+	let procedureDivisionStartLine = -1;
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+
+		// Detecta início da PROCEDURE DIVISION
+		if (/^\s*PROCEDURE\s+DIVISION/i.test(line)) {
+			inProcedureDivision = true;
+			procedureDivisionStartLine = i;
+			continue;
+		}
+
+		// Procura uso do nível 88 na PROCEDURE DIVISION
+		if (inProcedureDivision && i > procedureDivisionStartLine) {
+			// Ignora comentários
+			if (line.length > 6 && line[6] === '*') {
+				continue;
+			}
+
+			// Ignora a linha de declaração (na DATA DIVISION)
+			const isDeclaration = line.match(/^\s{6,}\s*88\s+/i);
+			if (isDeclaration) {
+				continue;
+			}
+
+			// Procura o nível 88 como palavra completa
+			const regex = new RegExp('\\b' + conditionName.replace(/-/g, '\\-') + '\\b', 'i');
+			if (regex.test(line)) {
+				console.log(`Nível 88 ${conditionName} encontrado na linha ${i}: ${line.trim()}`);
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+/**
+ * Extrai variáveis declaradas no código COBOL
+ * @param {string} text
+ * @returns {Map<string, {line: number, column: number, isLinkage: boolean, level88Conditions: string[]}>}
  */
 function extractDeclaredVariables(text) {
 	const variables = new Map();
@@ -118,10 +285,14 @@ function extractDeclaredVariables(text) {
 					// Ignora variáveis de grupo (que não têm PIC e têm sub-variáveis)
 					if (!isGroupVariable(lines, i, varLevel)) {
 						const column = line.indexOf(varMatch[2]);
+						// Extrai as condições de nível 88 associadas a esta variável
+						const level88Conditions = extractLevel88Conditions(lines, i, varLevel);
+
 						variables.set(varName, {
 							line: i,
 							column: column,
-							isLinkage: inLinkageSection
+							isLinkage: inLinkageSection,
+							level88Conditions: level88Conditions
 						});
 					} else {
 						console.log(`Variável ${varName} é um grupo - ignorada`);
@@ -139,9 +310,10 @@ function extractDeclaredVariables(text) {
  * @param {string} text
  * @param {string} varName
  * @param {boolean} isLinkage - Se true, verifica uso também na LINKAGE SECTION
+ * @param {string[]} level88Conditions - Condições de nível 88 associadas à variável
  * @returns {boolean}
  */
-function isVariableUsed(text, varName, isLinkage = false) {
+function isVariableUsed(text, varName, isLinkage = false, level88Conditions = []) {
 	const lines = text.split('\n');
 	let inProcedureDivision = false;
 	let inLinkageSection = false;
@@ -195,6 +367,15 @@ function isVariableUsed(text, varName, isLinkage = false) {
 				console.log(`Variável ${varName} encontrada na linha ${i}: ${line.trim()}`);
 				return true;
 			}
+
+			// Verifica se alguma das condições de nível 88 é usada
+			for (const condition of level88Conditions) {
+				const conditionRegex = new RegExp('\\b' + condition.replace(/-/g, '\\-') + '\\b', 'i');
+				if (conditionRegex.test(line)) {
+					console.log(`Condição nível 88 ${condition} da variável ${varName} encontrada na linha ${i}: ${line.trim()}`);
+					return true;
+				}
+			}
 		}
 
 		// Se é variável da LINKAGE SECTION, verifica uso também na própria LINKAGE SECTION
@@ -215,6 +396,15 @@ function isVariableUsed(text, varName, isLinkage = false) {
 			if (regex.test(line)) {
 				console.log(`Variável ${varName} encontrada na LINKAGE SECTION na linha ${i}: ${line.trim()}`);
 				return true;
+			}
+
+			// Verifica se alguma das condições de nível 88 é usada na LINKAGE SECTION
+			for (const condition of level88Conditions) {
+				const conditionRegex = new RegExp('\\b' + condition.replace(/-/g, '\\-') + '\\b', 'i');
+				if (conditionRegex.test(line)) {
+					console.log(`Condição nível 88 ${condition} da variável ${varName} encontrada na LINKAGE SECTION na linha ${i}: ${line.trim()}`);
+					return true;
+				}
 			}
 		}
 	}
@@ -1317,8 +1507,13 @@ function validateCobolDocument(document) {
 
 		// Verifica cada variável declarada
 		for (const [varName, position] of declaredVariables) {
-			const isUsed = isVariableUsed(text, varName, position.isLinkage);
+			const isUsed = isVariableUsed(text, varName, position.isLinkage, position.level88Conditions);
 			console.log(`Variável ${varName} (${position.isLinkage ? 'LINKAGE' : 'WORKING-STORAGE'}): ${isUsed ? 'USADA' : 'NÃO USADA'}`);
+
+			// Se a variável tem níveis 88, mostra-os
+			if (position.level88Conditions && position.level88Conditions.length > 0) {
+				console.log(`  Níveis 88: ${position.level88Conditions.join(', ')}`);
+			}
 
 			if (!isUsed) {
 				const range = new vscode.Range(
@@ -1334,6 +1529,38 @@ function validateCobolDocument(document) {
 					vscode.DiagnosticSeverity.Warning
 				);
 				diagnostic.code = 'unused-variable';
+				diagnostic.source = 'zCobol Validation';
+
+				diagnostics.push(diagnostic);
+			}
+		}
+	}
+
+	// Validação de níveis 88 não utilizados
+	const enableUnusedLevel88Check = config.get('enableUnusedLevel88Check', true);
+	if (enableUnusedLevel88Check) {
+		const declaredLevel88s = extractLevel88Declarations(text);
+		console.log('Níveis 88 declarados:', Array.from(declaredLevel88s.keys()));
+
+		// Verifica cada nível 88 declarado
+		for (const [conditionName, position] of declaredLevel88s) {
+			const isUsed = isLevel88Used(text, conditionName);
+			console.log(`Nível 88 ${conditionName}: ${isUsed ? 'USADO' : 'NÃO USADO'}`);
+
+			if (!isUsed) {
+				const range = new vscode.Range(
+					position.line,
+					position.column,
+					position.line,
+					position.column + conditionName.length
+				);
+
+				const diagnostic = new vscode.Diagnostic(
+					range,
+					`Level 88 condition '${conditionName}' is declared but not used`,
+					vscode.DiagnosticSeverity.Warning
+				);
+				diagnostic.code = 'unused-level88';
 				diagnostic.source = 'zCobol Validation';
 
 				diagnostics.push(diagnostic);
@@ -1474,7 +1701,7 @@ function validateCobolDocument(document) {
 	// Validação de operadores simbólicos em IFs
 	const enableSymbolicOperatorCheck = config.get('enableSymbolicOperatorCheck', true);
 	if (enableSymbolicOperatorCheck) {
-		const operatorFormat = config.get('operatorFormat', 'long');
+		const operatorFormat = /** @type {'long' | 'short'} */ (config.get('operatorFormat', 'long'));
 		const useShortForm = operatorFormat === 'short';
 		const symbolicOperators = findSymbolicOperatorsInIf(text, useShortForm);
 		console.log('Operadores simbólicos encontrados:', symbolicOperators.length);

@@ -11,6 +11,10 @@ Detects variables declared in WORKING-STORAGE or LINKAGE SECTION that are not us
 
 - ✅ **Quick Fix**: Delete line or comment with asterisk
 - 🎯 **Severity**: Warning
+- 🔧 **Smart Detection**:
+  - Considers level 88 conditions: a variable is marked as "used" if any of its 88-level conditions are used
+  - Ignores FILLER and FILLER-* variables
+  - Ignores group-level variables (variables without PIC that contain sub-variables)
 
 #### 2. **Unprotected Displays**
 Identifies DISPLAY commands that are not inside IF blocks.
@@ -78,6 +82,16 @@ Checks if declared SQL cursors have all necessary operations:
 
 - 🎯 **Severity**: Warning
 
+#### 12. **Unused Level 88 Conditions**
+Detects level 88 condition names that are declared but never used in the code.
+
+- ✅ **Quick Fix**: Delete line or comment with asterisk
+- 🎯 **Severity**: Warning
+- 🔧 **Smart Detection**:
+  - Validates each 88-level condition independently
+  - Ignores 88-level conditions associated with FILLER variables
+  - Example: `88 STATUS-OK VALUE 'Y'` triggers warning if `STATUS-OK` is never used
+
 ## Requirements
 
 - Visual Studio Code 1.75.0 or higher
@@ -92,6 +106,7 @@ This extension contributes the following settings:
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `zcobol-validation.enableUnusedVariableCheck` | `true` | Enable unused variable validation |
+| `zcobol-validation.enableUnusedLevel88Check` | `true` | Enable unused level 88 condition validation |
 | `zcobol-validation.enableUnprotectedDisplayCheck` | `true` | Enable unprotected display validation |
 | `zcobol-validation.enableGoToCheck` | `true` | Enable GO TO command validation |
 | `zcobol-validation.enableUnmatchedIfCheck` | `true` | Enable IF without END-IF validation |
@@ -159,19 +174,32 @@ IF WS-COUNTER GREATER THAN 10
 
 ## Release Notes
 
-### 0.0.1
+### 1.1.0 - 2026-03-13
 
-Initial release with:
+- Added unused level 88 condition validation
+- Enhanced unused variable detection with level 88 awareness
+- Improved FILLER variable handling
+
+### 1.0.0 - 2026-03-11
+
+Initial comprehensive release with:
 - Unused variable validation
 - Unprotected display validation
 - GO TO command validation
 - IF without END-IF validation
+- IF without ELSE validation (optional)
+- EVALUATE without WHEN OTHER validation (optional)
 - Symbolic operator validation
 - Hardcoded value validation
+- Lowercase code validation (optional)
 - File operations validation
 - Cursor operations validation
 - Automatic quick fixes
 - Customizable settings
+
+### 0.0.1
+
+Initial beta release
 
 ---
 
