@@ -74,10 +74,17 @@ function parseCobolDocument(text) {
  * @returns {boolean}
  */
 function isCobolFile(document) {
+	// Verifica primeiro o languageId (mais confiável)
+	if (document.languageId === 'cobol' || document.languageId === 'COBOL') {
+		return true;
+	}
+
+	// Verifica extensão do ficheiro (funciona com URIs locais e remotos)
 	const cobolExtensions = ['.cbl', '.cob', '.cobol', '.cpy'];
-	const fileName = document.fileName.toLowerCase();
-	return cobolExtensions.some(ext => fileName.endsWith(ext)) ||
-	       document.languageId === 'cobol';
+	const fileName = document.fileName ? document.fileName.toLowerCase() : '';
+	const uriPath = document.uri.path ? document.uri.path.toLowerCase() : '';
+
+	return cobolExtensions.some(ext => fileName.endsWith(ext) || uriPath.endsWith(ext));
 }
 
 /**
@@ -2478,14 +2485,23 @@ function activate(context) {
 	const provider = new CobolCodeActionProvider();
 	debugLog('CobolCodeActionProvider instanciado');
 
-	// Document selectors for COBOL files
+	// Document selectors for COBOL files - suporta ficheiros locais e remotos (Zowe Explorer)
 	const cobolSelector = [
+		// Ficheiros locais
 		{ scheme: 'file', language: 'cobol' },
 		{ scheme: 'file', language: 'COBOL' },
 		{ scheme: 'file', pattern: '**/*.cbl' },
 		{ scheme: 'file', pattern: '**/*.cob' },
 		{ scheme: 'file', pattern: '**/*.cobol' },
-		{ scheme: 'file', pattern: '**/*.cpy' }
+		{ scheme: 'file', pattern: '**/*.cpy' },
+		// Ficheiros do Zowe Explorer (datasets e USS)
+		{ scheme: 'zowe-ds', language: 'cobol' },
+		{ scheme: 'zowe-ds', language: 'COBOL' },
+		{ scheme: 'zowe-uss', language: 'cobol' },
+		{ scheme: 'zowe-uss', language: 'COBOL' },
+		// Outros esquemas remotos
+		{ scheme: 'vscode-remote', language: 'cobol' },
+		{ scheme: 'vscode-remote', language: 'COBOL' }
 	];
 
 	const codeActionsMetadata = {

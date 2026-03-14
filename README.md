@@ -97,6 +97,21 @@ Detects level 88 condition names that are declared but never used in the code.
 - Visual Studio Code 1.75.0 or higher
 - COBOL files with extensions: `.cbl`, `.cob`, `.cobol`, `.cpy`
 
+## Compatibility
+
+✅ **Works with:**
+- Local COBOL files
+- Remote files via Zowe Explorer (datasets and USS)
+- Remote files via VS Code Remote extensions
+- All Quick Fixes available for both local and remote files
+
+## Performance
+
+⚡ **Optimized for large files:**
+- Smart caching system - validates only when content changes
+- Debounced validation - waits 500ms after you stop typing
+- Minimal overhead - debug logging disabled by default
+
 ## Settings
 
 This extension contributes the following settings:
@@ -173,6 +188,14 @@ IF WS-COUNTER GREATER THAN 10
 - Some dynamically generated code cases may not be detected
 
 ## Release Notes
+
+### 1.2.0 - 2026-03-14
+
+**Performance & Compatibility**
+- Significant performance improvements with debouncing and caching
+- Full support for Zowe Explorer (datasets and USS files)
+- Optimized resource management and memory usage
+- Debug logging disabled by default for better performance
 
 ### 1.1.0 - 2026-03-13
 
