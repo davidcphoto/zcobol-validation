@@ -32,6 +32,14 @@ function isGroupVariable(lines, varLine, varLevel) {
 		return false;
 	}
 
+	// Se a próxima linha é um COPY, considera como grupo (variável estrutural)
+	if (varLine + 1 < lines.length) {
+		const nextLine = lines[varLine + 1];
+		if (/^\s{6,}\s*COPY\s+/i.test(nextLine)) {
+			return true;
+		}
+	}
+
 	// Verifica se a próxima linha (ou linhas) tem uma variável de nível maior
 	for (let i = varLine + 1; i < lines.length; i++) {
 		const line = lines[i];
@@ -675,16 +683,25 @@ function findUnmatchedIfs(text) {
 		// Detecta IF (mas não END-IF)
 		const ifMatch = lineContent.match(/^\s*(IF\s+)/i);
 		if (ifMatch && !/^\s*END-IF/i.test(lineContent)) {
-			const column = line.indexOf(ifMatch[1]);
-			ifStack.push({
-				line: i,
-				column: column,
-				length: ifMatch[1].trim().length
-			});
-			console.log(`IF encontrado na linha ${i}, stack size: ${ifStack.length}`);
+			// Verifica se o END-IF está na mesma linha (até o ponto final)
+			const dotIndex = lineContent.indexOf('.');
+			const contentUntilDot = dotIndex !== -1 ? lineContent.substring(0, dotIndex) : lineContent;
+			const hasEndIfInSameLine = /\bEND-IF\b/i.test(contentUntilDot);
+
+			if (!hasEndIfInSameLine) {
+				const column = line.indexOf(ifMatch[1]);
+				ifStack.push({
+					line: i,
+					column: column,
+					length: ifMatch[1].trim().length
+				});
+				console.log(`IF encontrado na linha ${i}, stack size: ${ifStack.length}`);
+			} else {
+				console.log(`IF com END-IF na mesma linha ${i}, ignorando`);
+			}
 		}
 
-		// Detecta END-IF
+		// Detecta END-IF em linha separada
 		if (/^\s*END-IF/i.test(lineContent)) {
 			if (ifStack.length > 0) {
 				ifStack.pop(); // Remove o IF correspondente
@@ -1851,6 +1868,17 @@ function validateCobolDocument(document) {
 
 	console.log('Total de warnings criados:', diagnostics.length);
 	diagnosticCollection.set(document.uri, diagnostics);
+
+	// Log para debug
+	if (diagnostics.length > 0) {
+		console.log('Diagnósticos criados para:', document.uri.toString());
+		console.log('Primeiro diagnóstico:', {
+			code: diagnostics[0].code,
+			source: diagnostics[0].source,
+			message: diagnostics[0].message,
+			range: diagnostics[0].range
+		});
+	}
 }
 
 /**
@@ -1858,11 +1886,73 @@ function validateCobolDocument(document) {
  */
 class CobolCodeActionProvider {
 	provideCodeActions(document, range, context) {
+		console.log('========================================');
+		console.log('provideCodeActions CHAMADO!');
+		console.log('Document:', document.uri.toString());
+		console.log('Range:', range);
+		console.log('Diagnósticos recebidos:', context.diagnostics.length);
+
+		if (context.diagnostics.length > 0) {
+			context.diagnostics.forEach((d, i) => {
+				console.log(`Diagnóstico ${i}:`, {
+					source: d.source,
+					code: d.code,
+					message: d.message,
+					severity: d.severity
+				});
+			});
+		}
+
 		const codeActions = [];
 
 		// Procura por diagnósticos de variáveis não utilizadas na posição atual
 		for (const diagnostic of context.diagnostics) {
+			console.log('Processando diagnostic:', diagnostic.code, 'source:', diagnostic.source);
 			if (diagnostic.source === 'zCobol Validation' && diagnostic.code === 'unused-variable') {
+				console.log('>>> CRIANDO code actions para unused-variable');
+				// Action 1: Delete line
+				const deleteLine = new vscode.CodeAction('Delete line', vscode.CodeActionKind.QuickFix);
+				deleteLine.diagnostics = [diagnostic];
+				deleteLine.edit = new vscode.WorkspaceEdit();
+
+				const deleteRange = new vscode.Range(
+					diagnostic.range.start.line,
+					0,
+					diagnostic.range.start.line + 1,
+					0
+				);
+				deleteLine.edit.delete(document.uri, deleteRange);
+				codeActions.push(deleteLine);
+				console.log('>>> Adicionada action: Delete line');
+
+				// Action 2: Comment line (asterisk in column 7)
+				const commentLine = new vscode.CodeAction('Comment line (asterisk)', vscode.CodeActionKind.QuickFix);
+				commentLine.diagnostics = [diagnostic];
+				commentLine.edit = new vscode.WorkspaceEdit();
+
+				const line = document.lineAt(diagnostic.range.start.line);
+				const lineText = line.text;
+				let newLineText;
+
+				// Em COBOL, o asterisco deve estar na coluna 7 (índice 6)
+				if (lineText.length >= 7) {
+					newLineText = lineText.substring(0, 6) + '*' + lineText.substring(7);
+				} else {
+					// Se a linha for muito curta, preenche com espaços até a coluna 7
+					newLineText = lineText.padEnd(6, ' ') + '*';
+				}
+
+				commentLine.edit.replace(
+					document.uri,
+					line.range,
+					newLineText
+				);
+				codeActions.push(commentLine);
+				console.log('>>> Adicionada action: Comment line');
+			}
+
+			// Code actions para níveis 88 não utilizados
+			if (diagnostic.source === 'zCobol Validation' && diagnostic.code === 'unused-level88') {
 				// Action 1: Delete line
 				const deleteLine = new vscode.CodeAction('Delete line', vscode.CodeActionKind.QuickFix);
 				deleteLine.diagnostics = [diagnostic];
@@ -2209,8 +2299,58 @@ class CobolCodeActionProvider {
 				convertToUpperCase.edit.replace(document.uri, diagnostic.range, upperCaseWord);
 				codeActions.push(convertToUpperCase);
 			}
+
+			// Code actions para operações de ficheiro em falta
+			if (diagnostic.source === 'zCobol Validation' && diagnostic.code === 'missing-file-operations') {
+				const line = document.lineAt(diagnostic.range.start.line);
+				const lineText = line.text;
+
+				// Action 1: Comment line
+				const commentLine = new vscode.CodeAction('Comment line (asterisk)', vscode.CodeActionKind.QuickFix);
+				commentLine.diagnostics = [diagnostic];
+				commentLine.edit = new vscode.WorkspaceEdit();
+
+				let newLineText;
+				if (lineText.length >= 7) {
+					newLineText = lineText.substring(0, 6) + '*' + lineText.substring(7);
+				} else {
+					newLineText = lineText.padEnd(6, ' ') + '*';
+				}
+
+				commentLine.edit.replace(document.uri, line.range, newLineText);
+				codeActions.push(commentLine);
+			}
+
+			// Code actions para operações de cursor em falta
+			if (diagnostic.source === 'zCobol Validation' && diagnostic.code === 'missing-cursor-operations') {
+				const line = document.lineAt(diagnostic.range.start.line);
+				const lineText = line.text;
+
+				// Action 1: Comment line
+				const commentLine = new vscode.CodeAction('Comment line (asterisk)', vscode.CodeActionKind.QuickFix);
+				commentLine.diagnostics = [diagnostic];
+				commentLine.edit = new vscode.WorkspaceEdit();
+
+				let newLineText;
+				if (lineText.length >= 7) {
+					newLineText = lineText.substring(0, 6) + '*' + lineText.substring(7);
+				} else {
+					newLineText = lineText.padEnd(6, ' ') + '*';
+				}
+
+				commentLine.edit.replace(document.uri, line.range, newLineText);
+				codeActions.push(commentLine);
+			}
 		}
 
+		console.log('========================================');
+		console.log('Total de code actions criadas:', codeActions.length);
+		if (codeActions.length > 0) {
+			codeActions.forEach((action, i) => {
+				console.log(`Action ${i}: ${action.title} (kind: ${action.kind})`);
+			});
+		}
+		console.log('========================================');
 		return codeActions;
 	}
 }
@@ -2225,24 +2365,39 @@ function activate(context) {
 
 	// Use the console to output diagnostic information (console.log) and errors (console.error)
 	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "zcobol-validation" is now active!');
+	console.log('=== zCobol Validation Extension ATIVADA ===');
 
 	// Cria a coleção de diagnósticos
-	diagnosticCollection = vscode.languages.createDiagnosticCollection('cobol');
+	diagnosticCollection = vscode.languages.createDiagnosticCollection('zCobol Validation');
 	context.subscriptions.push(diagnosticCollection);
+	console.log('DiagnosticCollection criada');
 
 	// Register the code actions provider for COBOL files
+	const provider = new CobolCodeActionProvider();
+	console.log('CobolCodeActionProvider instanciado');
+
+	// Document selectors for COBOL files
 	const cobolSelector = [
 		{ scheme: 'file', language: 'cobol' },
-		{ scheme: 'file', pattern: '**/*.{cbl,cob,cobol,cpy}' }
+		{ scheme: 'file', language: 'COBOL' },
+		{ scheme: 'file', pattern: '**/*.cbl' },
+		{ scheme: 'file', pattern: '**/*.cob' },
+		{ scheme: 'file', pattern: '**/*.cobol' },
+		{ scheme: 'file', pattern: '**/*.cpy' }
 	];
+
+	const codeActionsMetadata = {
+		providedCodeActionKinds: [vscode.CodeActionKind.QuickFix]
+	};
+
 	context.subscriptions.push(
 		vscode.languages.registerCodeActionsProvider(
 			cobolSelector,
-			new CobolCodeActionProvider(),
-			{ providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }
+			provider,
+			codeActionsMetadata
 		)
 	);
+	console.log('CodeActionsProvider registrado');
 
 	// Register the command to wrap with IF...END-IF
 	context.subscriptions.push(

@@ -1,0 +1,12 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. TESTQUICKFIX.
+
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+       01  WS-UNUSED-VAR           PIC X(10).
+       01  WS-USED-VAR             PIC X(10).
+
+       PROCEDURE DIVISION.
+           MOVE 'TEST' TO WS-USED-VAR.
+           DISPLAY 'TESTE'.
+           STOP RUN.
