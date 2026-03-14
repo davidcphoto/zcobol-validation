@@ -2,8 +2,71 @@
 // Import the module and reference it with the alias vscode in your code below
 const vscode = require('vscode');
 
+// Debug flag - desativado por padrão para melhor performance
+const DEBUG_MODE = false;
+const debugLog = DEBUG_MODE ? console.log.bind(console) : () => {};
+
 // Diagnostic collection for unused variable warnings
 let diagnosticCollection;
+
+// Debounce timers para evitar validação excessiva
+const validationTimers = new Map();
+const VALIDATION_DELAY = 500; // ms
+
+// Cache para resultados de validação
+const validationCache = new Map();
+
+/**
+ * Gera hash simples do texto para cache
+ * @param {string} text
+ * @returns {number}
+ */
+function simpleHash(text) {
+	let hash = 0;
+	for (let i = 0; i < text.length; i++) {
+		const char = text.charCodeAt(i);
+		hash = ((hash << 5) - hash) + char;
+		hash = hash & hash; // Convert to 32bit integer
+	}
+	return hash;
+}
+
+// Função reservada para otimizações futuras - parsing centralizado
+/*
+function parseCobolDocument(text) {
+	const lines = text.split('\n');
+	const sections = {
+		dataDivisionStart: -1,
+		workingStorageStart: -1,
+		linkageSectionStart: -1,
+		procedureDivisionStart: -1,
+		fileControlStart: -1
+	};
+
+	// Identifica as seções principais em uma única passagem
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+
+		if (/^\s*DATA\s+DIVISION/i.test(line)) {
+			sections.dataDivisionStart = i;
+		} else if (/^\s*WORKING-STORAGE\s+SECTION/i.test(line)) {
+			sections.workingStorageStart = i;
+		} else if (/^\s*LINKAGE\s+SECTION/i.test(line)) {
+			sections.linkageSectionStart = i;
+		} else if (/^\s*PROCEDURE\s+DIVISION/i.test(line)) {
+			sections.procedureDivisionStart = i;
+		} else if (/^\s*FILE-CONTROL/i.test(line)) {
+			sections.fileControlStart = i;
+		}
+	}
+
+	return {
+		lines,
+		sections,
+		text
+	};
+}
+*/
 
 /**
  * Verifica se o documento é um ficheiro COBOL
@@ -92,7 +155,7 @@ function extractLevel88Conditions(lines, varLine, varLevel) {
 			// Se é nível 88, adiciona à lista
 			if (level === 88) {
 				conditions.push(name);
-				console.log(`Nível 88 encontrado: ${name} associado à variável na linha ${varLine}`);
+				debugLog(`Nível 88 encontrado: ${name} associado à variável na linha ${varLine}`);
 			}
 			// Se é um nível igual ou menor que a variável, já saímos do escopo da variável
 			else if (level <= varLevel) {
@@ -161,7 +224,7 @@ function extractLevel88Declarations(text) {
 			if (varMatch) {
 				lastParentLevel = parseInt(varMatch[1]);
 				lastParentVar = varMatch[2].toUpperCase();
-				console.log(`Variável pai rastreada: ${lastParentVar} (nível ${lastParentLevel})`);
+				debugLog(`Variável pai rastreada: ${lastParentVar} (nível ${lastParentLevel})`);
 			}
 
 			// Procura declarações de nível 88
@@ -171,7 +234,7 @@ function extractLevel88Declarations(text) {
 
 				// Ignora níveis 88 de variáveis FILLER
 				if (lastParentVar && (lastParentVar === 'FILLER' || lastParentVar.startsWith('FILLER-'))) {
-					console.log(`Nível 88 ${conditionName} ignorado (associado a FILLER: ${lastParentVar})`);
+					debugLog(`Nível 88 ${conditionName} ignorado (associado a FILLER: ${lastParentVar})`);
 					continue;
 				}
 
@@ -182,7 +245,7 @@ function extractLevel88Declarations(text) {
 					column: column,
 					isLinkage: inLinkageSection
 				});
-				console.log(`Nível 88 declarado: ${conditionName} na linha ${i}`);
+				debugLog(`Nível 88 declarado: ${conditionName} na linha ${i}`);
 			}
 		}
 	}
@@ -227,7 +290,7 @@ function isLevel88Used(text, conditionName) {
 			// Procura o nível 88 como palavra completa
 			const regex = new RegExp('\\b' + conditionName.replace(/-/g, '\\-') + '\\b', 'i');
 			if (regex.test(line)) {
-				console.log(`Nível 88 ${conditionName} encontrado na linha ${i}: ${line.trim()}`);
+				debugLog(`Nível 88 ${conditionName} encontrado na linha ${i}: ${line.trim()}`);
 				return true;
 			}
 		}
@@ -303,7 +366,7 @@ function extractDeclaredVariables(text) {
 							level88Conditions: level88Conditions
 						});
 					} else {
-						console.log(`Variável ${varName} é um grupo - ignorada`);
+						debugLog(`Variável ${varName} é um grupo - ignorada`);
 					}
 				}
 			}
@@ -358,7 +421,7 @@ function isVariableUsed(text, varName, isLinkage = false, level88Conditions = []
 			inLinkageSection = false;
 			inDataDivision = false;
 			procedureDivisionStartLine = i;
-			console.log(`PROCEDURE DIVISION encontrada na linha ${i}`);
+			debugLog(`PROCEDURE DIVISION encontrada na linha ${i}`);
 			continue;
 		}
 
@@ -372,7 +435,7 @@ function isVariableUsed(text, varName, isLinkage = false, level88Conditions = []
 			// Procura a variável como palavra completa (não parte de outra palavra)
 			const regex = new RegExp('\\b' + varName.replace(/-/g, '\\-') + '\\b', 'i');
 			if (regex.test(line)) {
-				console.log(`Variável ${varName} encontrada na linha ${i}: ${line.trim()}`);
+				debugLog(`Variável ${varName} encontrada na linha ${i}: ${line.trim()}`);
 				return true;
 			}
 
@@ -380,7 +443,7 @@ function isVariableUsed(text, varName, isLinkage = false, level88Conditions = []
 			for (const condition of level88Conditions) {
 				const conditionRegex = new RegExp('\\b' + condition.replace(/-/g, '\\-') + '\\b', 'i');
 				if (conditionRegex.test(line)) {
-					console.log(`Condição nível 88 ${condition} da variável ${varName} encontrada na linha ${i}: ${line.trim()}`);
+					debugLog(`Condição nível 88 ${condition} da variável ${varName} encontrada na linha ${i}: ${line.trim()}`);
 					return true;
 				}
 			}
@@ -402,7 +465,7 @@ function isVariableUsed(text, varName, isLinkage = false, level88Conditions = []
 			// Procura a variável como palavra completa (não parte de outra palavra)
 			const regex = new RegExp('\\b' + varName.replace(/-/g, '\\-') + '\\b', 'i');
 			if (regex.test(line)) {
-				console.log(`Variável ${varName} encontrada na LINKAGE SECTION na linha ${i}: ${line.trim()}`);
+				debugLog(`Variável ${varName} encontrada na LINKAGE SECTION na linha ${i}: ${line.trim()}`);
 				return true;
 			}
 
@@ -410,7 +473,7 @@ function isVariableUsed(text, varName, isLinkage = false, level88Conditions = []
 			for (const condition of level88Conditions) {
 				const conditionRegex = new RegExp('\\b' + condition.replace(/-/g, '\\-') + '\\b', 'i');
 				if (conditionRegex.test(line)) {
-					console.log(`Condição nível 88 ${condition} da variável ${varName} encontrada na LINKAGE SECTION na linha ${i}: ${line.trim()}`);
+					debugLog(`Condição nível 88 ${condition} da variável ${varName} encontrada na LINKAGE SECTION na linha ${i}: ${line.trim()}`);
 					return true;
 				}
 			}
@@ -452,7 +515,7 @@ function findUnprotectedDisplays(text) {
 		// Detecta início de IF
 		if (/^\s*IF\s+/i.test(line.substring(6))) {
 			ifNestingLevel++;
-			console.log(`IF encontrado na linha ${i}, nível: ${ifNestingLevel}`);
+			debugLog(`IF encontrado na linha ${i}, nível: ${ifNestingLevel}`);
 		}
 
 		// Detecta fim de IF
@@ -460,7 +523,7 @@ function findUnprotectedDisplays(text) {
 			if (ifNestingLevel > 0) {
 				ifNestingLevel--;
 			}
-			console.log(`END-IF encontrado na linha ${i}, nível: ${ifNestingLevel}`);
+			debugLog(`END-IF encontrado na linha ${i}, nível: ${ifNestingLevel}`);
 		}
 
 		// Detecta DISPLAY fora de blocos IF
@@ -472,7 +535,7 @@ function findUnprotectedDisplays(text) {
 				column: column,
 				length: displayMatch[1].trim().length
 			});
-			console.log(`DISPLAY não protegido encontrado na linha ${i}`);
+			debugLog(`DISPLAY não protegido encontrado na linha ${i}`);
 		}
 	}
 
@@ -591,7 +654,7 @@ function findSymbolicOperatorsInIf(text, useShortForm = false) {
 							operator: pattern.operator,
 							replacement: pattern.replacement
 						});
-						console.log(`Operador simbólico '${pattern.operator}' encontrado na linha ${lineIndex}`);
+						debugLog(`Operador simbólico '${pattern.operator}' encontrado na linha ${lineIndex}`);
 					}
 				}
 			}
@@ -643,7 +706,7 @@ function findGoToStatements(text) {
 				length: gotoMatch[1].trim().length,
 				target: target
 			});
-			console.log(`GO TO encontrado na linha ${i} para ${target}`);
+			debugLog(`GO TO encontrado na linha ${i} para ${target}`);
 		}
 	}
 
@@ -695,9 +758,9 @@ function findUnmatchedIfs(text) {
 					column: column,
 					length: ifMatch[1].trim().length
 				});
-				console.log(`IF encontrado na linha ${i}, stack size: ${ifStack.length}`);
+				debugLog(`IF encontrado na linha ${i}, stack size: ${ifStack.length}`);
 			} else {
-				console.log(`IF com END-IF na mesma linha ${i}, ignorando`);
+				debugLog(`IF com END-IF na mesma linha ${i}, ignorando`);
 			}
 		}
 
@@ -705,13 +768,13 @@ function findUnmatchedIfs(text) {
 		if (/^\s*END-IF/i.test(lineContent)) {
 			if (ifStack.length > 0) {
 				ifStack.pop(); // Remove o IF correspondente
-				console.log(`END-IF encontrado na linha ${i}, stack size: ${ifStack.length}`);
+				debugLog(`END-IF encontrado na linha ${i}, stack size: ${ifStack.length}`);
 			}
 		}
 	}
 
 	// IFs que sobraram no stack não têm END-IF correspondente
-	console.log(`IFs sem END-IF: ${ifStack.length}`);
+	debugLog(`IFs sem END-IF: ${ifStack.length}`);
 	return ifStack;
 }
 
@@ -792,7 +855,7 @@ function findIfsWithoutElse(text) {
 
 			if (!hasElse) {
 				ifsWithoutElse.push(ifInfo);
-				console.log(`IF sem ELSE encontrado na linha ${i}`);
+				debugLog(`IF sem ELSE encontrado na linha ${i}`);
 			}
 		}
 	}
@@ -877,7 +940,7 @@ function findEvaluatesWithoutWhenOther(text) {
 
 			if (!hasWhenOther) {
 				evaluatesWithoutWhenOther.push(evaluateInfo);
-				console.log(`EVALUATE sem WHEN OTHER encontrado na linha ${i}`);
+				debugLog(`EVALUATE sem WHEN OTHER encontrado na linha ${i}`);
 			}
 		}
 	}
@@ -949,7 +1012,7 @@ function findLowerCaseCode(text) {
 					length: word.length,
 					word: word
 				});
-				console.log(`Código em minúsculas encontrado na linha ${i}: ${word}`);
+				debugLog(`Código em minúsculas encontrado na linha ${i}: ${word}`);
 			}
 		}
 	}
@@ -973,14 +1036,14 @@ function extractFileDeclarations(text) {
 		// Detecta início da FILE-CONTROL
 		if (/^\s*FILE-CONTROL/i.test(line)) {
 			inFileControl = true;
-			console.log(`FILE-CONTROL encontrado na linha ${i}`);
+			debugLog(`FILE-CONTROL encontrado na linha ${i}`);
 			continue;
 		}
 
 		// Detecta fim da FILE-CONTROL (quando encontra outra seção ou divisão)
 		if (inFileControl && /^\s*(I-O-CONTROL|DATA\s+DIVISION|PROCEDURE\s+DIVISION)/i.test(line)) {
 			inFileControl = false;
-			console.log(`Fim de FILE-CONTROL na linha ${i}`);
+			debugLog(`Fim de FILE-CONTROL na linha ${i}`);
 			continue;
 		}
 
@@ -1000,7 +1063,7 @@ function extractFileDeclarations(text) {
 					line: i,
 					column: column
 				});
-				console.log(`Ficheiro declarado: ${fileName} na linha ${i}`);
+				debugLog(`Ficheiro declarado: ${fileName} na linha ${i}`);
 			}
 		}
 	}
@@ -1049,7 +1112,7 @@ function hasFileOperations(text, fileName) {
 		if (/^\s*OPEN\s+(INPUT|OUTPUT|I-O|EXTEND)/i.test(lineContent)) {
 			if (fileNameRegex.test(lineContent)) {
 				hasOpen = true;
-				console.log(`OPEN encontrado para ${fileName} na linha ${i}`);
+				debugLog(`OPEN encontrado para ${fileName} na linha ${i}`);
 			}
 		}
 
@@ -1057,7 +1120,7 @@ function hasFileOperations(text, fileName) {
 		if (/^\s*CLOSE\s+/i.test(lineContent)) {
 			if (fileNameRegex.test(lineContent)) {
 				hasClose = true;
-				console.log(`CLOSE encontrado para ${fileName} na linha ${i}`);
+				debugLog(`CLOSE encontrado para ${fileName} na linha ${i}`);
 			}
 		}
 
@@ -1065,7 +1128,7 @@ function hasFileOperations(text, fileName) {
 		if (/^\s*READ\s+/i.test(lineContent)) {
 			if (fileNameRegex.test(lineContent)) {
 				hasReadOrWrite = true;
-				console.log(`READ encontrado para ${fileName} na linha ${i}`);
+				debugLog(`READ encontrado para ${fileName} na linha ${i}`);
 			}
 		}
 
@@ -1077,7 +1140,7 @@ function hasFileOperations(text, fileName) {
 			// Uma validação mais rigorosa precisaria rastrear o FD e os records
 			if (fileNameRegex.test(lineContent)) {
 				hasReadOrWrite = true;
-				console.log(`WRITE encontrado para ${fileName} na linha ${i}`);
+				debugLog(`WRITE encontrado para ${fileName} na linha ${i}`);
 			}
 		}
 	}
@@ -1115,7 +1178,7 @@ function findFilesWithoutOperations(text) {
 				column: position.column,
 				missing: missing
 			});
-			console.log(`Ficheiro ${fileName} sem operações: ${missing.join(', ')}`);
+			debugLog(`Ficheiro ${fileName} sem operações: ${missing.join(', ')}`);
 		}
 	}
 
@@ -1147,7 +1210,7 @@ function extractCursorDeclarations(text) {
 			inExecSqlBlock = true;
 			execSqlContent = line;
 			execSqlStartLine = i;
-			console.log(`Início de bloco EXEC SQL na linha ${i}`);
+			debugLog(`Início de bloco EXEC SQL na linha ${i}`);
 		} else if (inExecSqlBlock) {
 			// Adiciona linha ao conteúdo do bloco SQL
 			execSqlContent += ' ' + line.trim();
@@ -1155,7 +1218,7 @@ function extractCursorDeclarations(text) {
 
 		// Detecta fim de bloco EXEC SQL
 		if (inExecSqlBlock && /END-EXEC/i.test(line)) {
-			console.log(`Fim de bloco EXEC SQL na linha ${i}, conteúdo: ${execSqlContent.substring(0, 100)}...`);
+			debugLog(`Fim de bloco EXEC SQL na linha ${i}, conteúdo: ${execSqlContent.substring(0, 100)}...`);
 
 			// Procura por DECLARE <nome> CURSOR no conteúdo completo do bloco
 			const declareMatch = execSqlContent.match(/DECLARE\s+([A-Z0-9][\w-]*)\s+CURSOR/i);
@@ -1179,7 +1242,7 @@ function extractCursorDeclarations(text) {
 					line: cursorLine,
 					column: cursorColumn
 				});
-				console.log(`Cursor declarado: ${cursorName} na linha ${cursorLine}`);
+				debugLog(`Cursor declarado: ${cursorName} na linha ${cursorLine}`);
 			}
 
 			// Reset para próximo bloco
@@ -1245,19 +1308,19 @@ function hasCursorOperations(text, cursorName) {
 			// Verifica OPEN
 			if (/\bOPEN\b/i.test(execSqlContent) && cursorNameRegex.test(execSqlContent)) {
 				hasOpen = true;
-				console.log(`OPEN encontrado para cursor ${cursorName} na linha ${i}`);
+				debugLog(`OPEN encontrado para cursor ${cursorName} na linha ${i}`);
 			}
 
 			// Verifica FETCH
 			if (/\bFETCH\b/i.test(execSqlContent) && cursorNameRegex.test(execSqlContent)) {
 				hasFetch = true;
-				console.log(`FETCH encontrado para cursor ${cursorName} na linha ${i}`);
+				debugLog(`FETCH encontrado para cursor ${cursorName} na linha ${i}`);
 			}
 
 			// Verifica CLOSE
 			if (/\bCLOSE\b/i.test(execSqlContent) && cursorNameRegex.test(execSqlContent)) {
 				hasClose = true;
-				console.log(`CLOSE encontrado para cursor ${cursorName} na linha ${i}`);
+				debugLog(`CLOSE encontrado para cursor ${cursorName} na linha ${i}`);
 			}
 
 			// Reset para próximo bloco
@@ -1299,7 +1362,7 @@ function findCursorsWithoutOperations(text) {
 				column: position.column,
 				missing: missing
 			});
-			console.log(`Cursor ${cursorName} sem operações: ${missing.join(', ')}`);
+			debugLog(`Cursor ${cursorName} sem operações: ${missing.join(', ')}`);
 		}
 	}
 
@@ -1437,7 +1500,7 @@ function findHardcodedValues(text, enableInString = false, enableInDisplay = fal
 						value: value,
 						type: 'string'
 					});
-					console.log(`String hardcoded encontrada na linha ${lineIndex}: ${value}`);
+					debugLog(`String hardcoded encontrada na linha ${lineIndex}: ${value}`);
 				}
 			}
 
@@ -1489,7 +1552,7 @@ function findHardcodedValues(text, enableInString = false, enableInDisplay = fal
 									value: value,
 									type: 'number'
 								});
-								console.log(`Número hardcoded encontrado na linha ${lineIndex}: ${value}`);
+								debugLog(`Número hardcoded encontrado na linha ${lineIndex}: ${value}`);
 							}
 						}
 					}
@@ -1502,34 +1565,67 @@ function findHardcodedValues(text, enableInString = false, enableInDisplay = fal
 }
 
 /**
+ * Valida o documento com debounce para evitar validações excessivas
+ * @param {vscode.TextDocument} document
+ */
+function validateCobolDocumentDebounced(document) {
+	const uri = document.uri.toString();
+
+	// Limpa o timer anterior para este documento
+	const existingTimer = validationTimers.get(uri);
+	if (existingTimer) {
+		clearTimeout(existingTimer);
+	}
+
+	// Cria novo timer
+	const timer = setTimeout(() => {
+		validateCobolDocument(document);
+		validationTimers.delete(uri);
+	}, VALIDATION_DELAY);
+
+	validationTimers.set(uri, timer);
+}
+
+/**
  * Valida o documento COBOL e atualiza os diagnósticos
  * @param {vscode.TextDocument} document
  */
 function validateCobolDocument(document) {
 	if (!isCobolFile(document)) {
-		console.log('Não é ficheiro COBOL:', document.fileName);
 		return;
 	}
 
-	console.log('Validando ficheiro COBOL:', document.fileName);
-	const diagnostics = [];
 	const text = document.getText();
+	const uri = document.uri.toString();
+	const contentHash = simpleHash(text);
+
+	// Verifica cache - se o conteúdo não mudou, usa resultado em cache
+	const cached = validationCache.get(uri);
+	if (cached && cached.hash === contentHash) {
+		diagnosticCollection.set(document.uri, cached.diagnostics);
+		return;
+	}
+
+	const diagnostics = [];
 	const config = vscode.workspace.getConfiguration('zcobol-validation');
+
+	// Parse único do documento (reservado para otimizações futuras)
+	// const parsed = parseCobolDocument(text);
 
 	// Validação de variáveis não utilizadas
 	const enableUnusedVarCheck = config.get('enableUnusedVariableCheck', true);
 	if (enableUnusedVarCheck) {
 		const declaredVariables = extractDeclaredVariables(text);
-		console.log('Variáveis declaradas:', Array.from(declaredVariables.keys()));
+		debugLog('Variáveis declaradas:', Array.from(declaredVariables.keys()));
 
 		// Verifica cada variável declarada
 		for (const [varName, position] of declaredVariables) {
 			const isUsed = isVariableUsed(text, varName, position.isLinkage, position.level88Conditions);
-			console.log(`Variável ${varName} (${position.isLinkage ? 'LINKAGE' : 'WORKING-STORAGE'}): ${isUsed ? 'USADA' : 'NÃO USADA'}`);
+			debugLog(`Variável ${varName} (${position.isLinkage ? 'LINKAGE' : 'WORKING-STORAGE'}): ${isUsed ? 'USADA' : 'NÃO USADA'}`);
 
 			// Se a variável tem níveis 88, mostra-os
 			if (position.level88Conditions && position.level88Conditions.length > 0) {
-				console.log(`  Níveis 88: ${position.level88Conditions.join(', ')}`);
+				debugLog(`  Níveis 88: ${position.level88Conditions.join(', ')}`);
 			}
 
 			if (!isUsed) {
@@ -1557,12 +1653,12 @@ function validateCobolDocument(document) {
 	const enableUnusedLevel88Check = config.get('enableUnusedLevel88Check', true);
 	if (enableUnusedLevel88Check) {
 		const declaredLevel88s = extractLevel88Declarations(text);
-		console.log('Níveis 88 declarados:', Array.from(declaredLevel88s.keys()));
+		debugLog('Níveis 88 declarados:', Array.from(declaredLevel88s.keys()));
 
 		// Verifica cada nível 88 declarado
 		for (const [conditionName, position] of declaredLevel88s) {
 			const isUsed = isLevel88Used(text, conditionName);
-			console.log(`Nível 88 ${conditionName}: ${isUsed ? 'USADO' : 'NÃO USADO'}`);
+			debugLog(`Nível 88 ${conditionName}: ${isUsed ? 'USADO' : 'NÃO USADO'}`);
 
 			if (!isUsed) {
 				const range = new vscode.Range(
@@ -1589,7 +1685,7 @@ function validateCobolDocument(document) {
 	const enableUnprotectedDisplayCheck = config.get('enableUnprotectedDisplayCheck', true);
 	if (enableUnprotectedDisplayCheck) {
 		const unprotectedDisplays = findUnprotectedDisplays(text);
-		console.log('Displays não protegidos encontrados:', unprotectedDisplays.length);
+		debugLog('Displays não protegidos encontrados:', unprotectedDisplays.length);
 
 		for (const display of unprotectedDisplays) {
 			const range = new vscode.Range(
@@ -1615,7 +1711,7 @@ function validateCobolDocument(document) {
 	const enableGoToCheck = config.get('enableGoToCheck', true);
 	if (enableGoToCheck) {
 		const gotos = findGoToStatements(text);
-		console.log('Comandos GO TO encontrados:', gotos.length);
+		debugLog('Comandos GO TO encontrados:', gotos.length);
 
 		for (const goto of gotos) {
 			const range = new vscode.Range(
@@ -1641,7 +1737,7 @@ function validateCobolDocument(document) {
 	const enableUnmatchedIfCheck = config.get('enableUnmatchedIfCheck', true);
 	if (enableUnmatchedIfCheck) {
 		const unmatchedIfs = findUnmatchedIfs(text);
-		console.log('IFs sem END-IF encontrados:', unmatchedIfs.length);
+		debugLog('IFs sem END-IF encontrados:', unmatchedIfs.length);
 
 		for (const ifStatement of unmatchedIfs) {
 			const range = new vscode.Range(
@@ -1667,7 +1763,7 @@ function validateCobolDocument(document) {
 	const enableIfWithoutElseCheck = config.get('enableIfWithoutElseCheck', false);
 	if (enableIfWithoutElseCheck) {
 		const ifsWithoutElse = findIfsWithoutElse(text);
-		console.log('IFs sem ELSE encontrados:', ifsWithoutElse.length);
+		debugLog('IFs sem ELSE encontrados:', ifsWithoutElse.length);
 
 		for (const ifStatement of ifsWithoutElse) {
 			const range = new vscode.Range(
@@ -1693,7 +1789,7 @@ function validateCobolDocument(document) {
 	const enableEvaluateWithoutWhenOtherCheck = config.get('enableEvaluateWithoutWhenOtherCheck', false);
 	if (enableEvaluateWithoutWhenOtherCheck) {
 		const evaluatesWithoutWhenOther = findEvaluatesWithoutWhenOther(text);
-		console.log('EVALUATE sem WHEN OTHER encontrados:', evaluatesWithoutWhenOther.length);
+		debugLog('EVALUATE sem WHEN OTHER encontrados:', evaluatesWithoutWhenOther.length);
 
 		for (const evaluateStatement of evaluatesWithoutWhenOther) {
 			const range = new vscode.Range(
@@ -1721,7 +1817,7 @@ function validateCobolDocument(document) {
 		const operatorFormat = /** @type {'long' | 'short'} */ (config.get('operatorFormat', 'long'));
 		const useShortForm = operatorFormat === 'short';
 		const symbolicOperators = findSymbolicOperatorsInIf(text, useShortForm);
-		console.log('Operadores simbólicos encontrados:', symbolicOperators.length);
+		debugLog('Operadores simbólicos encontrados:', symbolicOperators.length);
 
 		for (const op of symbolicOperators) {
 			const range = new vscode.Range(
@@ -1754,7 +1850,7 @@ function validateCobolDocument(document) {
 		const enableInString = config.get('enableHardcodedInString', false);
 		const enableInDisplay = config.get('enableHardcodedInDisplay', false);
 		const hardcodedValues = findHardcodedValues(text, enableInString, enableInDisplay);
-		console.log('Valores hardcoded encontrados:', hardcodedValues.length);
+		debugLog('Valores hardcoded encontrados:', hardcodedValues.length);
 
 		for (const hardcoded of hardcodedValues) {
 			const range = new vscode.Range(
@@ -1785,7 +1881,7 @@ function validateCobolDocument(document) {
 	const enableLowerCaseCheck = config.get('enableLowerCaseCheck', false);
 	if (enableLowerCaseCheck) {
 		const lowerCaseCode = findLowerCaseCode(text);
-		console.log('Código em minúsculas encontrado:', lowerCaseCode.length);
+		debugLog('Código em minúsculas encontrado:', lowerCaseCode.length);
 
 		for (const lowerCase of lowerCaseCode) {
 			const range = new vscode.Range(
@@ -1816,7 +1912,7 @@ function validateCobolDocument(document) {
 	const enableFileOperationsCheck = config.get('enableFileOperationsCheck', true);
 	if (enableFileOperationsCheck) {
 		const filesWithoutOps = findFilesWithoutOperations(text);
-		console.log('Files without complete operations:', filesWithoutOps.length);
+		debugLog('Files without complete operations:', filesWithoutOps.length);
 
 		for (const file of filesWithoutOps) {
 			const range = new vscode.Range(
@@ -1843,7 +1939,7 @@ function validateCobolDocument(document) {
 	const enableCursorOperationsCheck = config.get('enableCursorOperationsCheck', true);
 	if (enableCursorOperationsCheck) {
 		const cursorsWithoutOps = findCursorsWithoutOperations(text);
-		console.log('Cursors without complete operations:', cursorsWithoutOps.length);
+		debugLog('Cursors without complete operations:', cursorsWithoutOps.length);
 
 		for (const cursor of cursorsWithoutOps) {
 			const range = new vscode.Range(
@@ -1866,13 +1962,19 @@ function validateCobolDocument(document) {
 		}
 	}
 
-	console.log('Total de warnings criados:', diagnostics.length);
+	debugLog('Total de warnings criados:', diagnostics.length);
 	diagnosticCollection.set(document.uri, diagnostics);
+
+	// Salva no cache
+	validationCache.set(uri, {
+		hash: contentHash,
+		diagnostics: diagnostics
+	});
 
 	// Log para debug
 	if (diagnostics.length > 0) {
-		console.log('Diagnósticos criados para:', document.uri.toString());
-		console.log('Primeiro diagnóstico:', {
+		debugLog('Diagnósticos criados para:', document.uri.toString());
+		debugLog('Primeiro diagnóstico:', {
 			code: diagnostics[0].code,
 			source: diagnostics[0].source,
 			message: diagnostics[0].message,
@@ -1886,15 +1988,15 @@ function validateCobolDocument(document) {
  */
 class CobolCodeActionProvider {
 	provideCodeActions(document, range, context) {
-		console.log('========================================');
-		console.log('provideCodeActions CHAMADO!');
-		console.log('Document:', document.uri.toString());
-		console.log('Range:', range);
-		console.log('Diagnósticos recebidos:', context.diagnostics.length);
+		debugLog('========================================');
+		debugLog('provideCodeActions CHAMADO!');
+		debugLog('Document:', document.uri.toString());
+		debugLog('Range:', range);
+		debugLog('Diagnósticos recebidos:', context.diagnostics.length);
 
 		if (context.diagnostics.length > 0) {
 			context.diagnostics.forEach((d, i) => {
-				console.log(`Diagnóstico ${i}:`, {
+				debugLog(`Diagnóstico ${i}:`, {
 					source: d.source,
 					code: d.code,
 					message: d.message,
@@ -1907,9 +2009,9 @@ class CobolCodeActionProvider {
 
 		// Procura por diagnósticos de variáveis não utilizadas na posição atual
 		for (const diagnostic of context.diagnostics) {
-			console.log('Processando diagnostic:', diagnostic.code, 'source:', diagnostic.source);
+			debugLog('Processando diagnostic:', diagnostic.code, 'source:', diagnostic.source);
 			if (diagnostic.source === 'zCobol Validation' && diagnostic.code === 'unused-variable') {
-				console.log('>>> CRIANDO code actions para unused-variable');
+				debugLog('>>> CRIANDO code actions para unused-variable');
 				// Action 1: Delete line
 				const deleteLine = new vscode.CodeAction('Delete line', vscode.CodeActionKind.QuickFix);
 				deleteLine.diagnostics = [diagnostic];
@@ -1923,7 +2025,7 @@ class CobolCodeActionProvider {
 				);
 				deleteLine.edit.delete(document.uri, deleteRange);
 				codeActions.push(deleteLine);
-				console.log('>>> Adicionada action: Delete line');
+				debugLog('>>> Adicionada action: Delete line');
 
 				// Action 2: Comment line (asterisk in column 7)
 				const commentLine = new vscode.CodeAction('Comment line (asterisk)', vscode.CodeActionKind.QuickFix);
@@ -1948,7 +2050,7 @@ class CobolCodeActionProvider {
 					newLineText
 				);
 				codeActions.push(commentLine);
-				console.log('>>> Adicionada action: Comment line');
+				debugLog('>>> Adicionada action: Comment line');
 			}
 
 			// Code actions para níveis 88 não utilizados
@@ -2343,14 +2445,14 @@ class CobolCodeActionProvider {
 			}
 		}
 
-		console.log('========================================');
-		console.log('Total de code actions criadas:', codeActions.length);
+		debugLog('========================================');
+		debugLog('Total de code actions criadas:', codeActions.length);
 		if (codeActions.length > 0) {
 			codeActions.forEach((action, i) => {
-				console.log(`Action ${i}: ${action.title} (kind: ${action.kind})`);
+				debugLog(`Action ${i}: ${action.title} (kind: ${action.kind})`);
 			});
 		}
-		console.log('========================================');
+		debugLog('========================================');
 		return codeActions;
 	}
 }
@@ -2365,16 +2467,16 @@ function activate(context) {
 
 	// Use the console to output diagnostic information (console.log) and errors (console.error)
 	// This line of code will only be executed once when your extension is activated
-	console.log('=== zCobol Validation Extension ATIVADA ===');
+	debugLog('=== zCobol Validation Extension ATIVADA ===');
 
 	// Cria a coleção de diagnósticos
 	diagnosticCollection = vscode.languages.createDiagnosticCollection('zCobol Validation');
 	context.subscriptions.push(diagnosticCollection);
-	console.log('DiagnosticCollection criada');
+	debugLog('DiagnosticCollection criada');
 
 	// Register the code actions provider for COBOL files
 	const provider = new CobolCodeActionProvider();
-	console.log('CobolCodeActionProvider instanciado');
+	debugLog('CobolCodeActionProvider instanciado');
 
 	// Document selectors for COBOL files
 	const cobolSelector = [
@@ -2397,7 +2499,7 @@ function activate(context) {
 			codeActionsMetadata
 		)
 	);
-	console.log('CodeActionsProvider registrado');
+	debugLog('CodeActionsProvider registrado');
 
 	// Register the command to wrap with IF...END-IF
 	context.subscriptions.push(
@@ -2494,7 +2596,7 @@ function activate(context) {
 					// Compara o valor (remove espaços extras)
 					if (constValue === hardcodedValue.trim()) {
 						existingConstant = constName;
-						console.log(`Existing constant found: ${constName} with value ${constValue}`);
+						debugLog(`Existing constant found: ${constName} with value ${constValue}`);
 						break;
 					}
 				}
@@ -2591,7 +2693,7 @@ function activate(context) {
 	// Validate when document is modified
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeTextDocument(event => {
-			validateCobolDocument(event.document);
+			validateCobolDocumentDebounced(event.document);
 		})
 	);
 
@@ -2599,8 +2701,17 @@ function activate(context) {
 	context.subscriptions.push(
 		vscode.window.onDidChangeActiveTextEditor(editor => {
 			if (editor) {
-				validateCobolDocument(editor.document);
+				validateCobolDocumentDebounced(editor.document);
 			}
+		})
+	);
+
+	// Limpa cache quando documento é fechado
+	context.subscriptions.push(
+		vscode.workspace.onDidCloseTextDocument(document => {
+			const uri = document.uri.toString();
+			validationCache.delete(uri);
+			validationTimers.delete(uri);
 		})
 	);
 
@@ -2624,7 +2735,9 @@ function activate(context) {
 			    event.affectsConfiguration('zcobol-validation.enableFileOperationsCheck') ||
 			    event.affectsConfiguration('zcobol-validation.enableCursorOperationsCheck') ||
 			    event.affectsConfiguration('zcobol-validation.operatorFormat')) {
-				console.log('Configuration changed - revalidating all documents');
+				debugLog('Configuration changed - revalidating all documents');
+				// Limpa cache pois configuração mudou
+				validationCache.clear();
 				vscode.workspace.textDocuments.forEach(document => {
 					validateCobolDocument(document);
 				});
@@ -2635,6 +2748,15 @@ function activate(context) {
 
 // This method is called when your extension is deactivated
 function deactivate() {
+	// Limpa timers pendentes
+	for (const timer of validationTimers.values()) {
+		clearTimeout(timer);
+	}
+	validationTimers.clear();
+
+	// Limpa cache
+	validationCache.clear();
+
 	if (diagnosticCollection) {
 		diagnosticCollection.clear();
 		diagnosticCollection.dispose();
@@ -2645,3 +2767,4 @@ module.exports = {
 	activate,
 	deactivate
 }
+
