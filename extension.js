@@ -121,6 +121,61 @@ function getColumnOffset(useTraditionalFormat) {
 	return useTraditionalFormat ? 7 : 0;
 }
 
+/**
+ * Verifica se uma linha é PROCEDURE DIVISION
+ * @param {string} line
+ * @param {boolean} useTraditionalFormat
+ * @returns {boolean}
+ */
+// function isProcedureDivision(line, useTraditionalFormat = true) {
+// 	const codeArea = getCobolCodeArea(line, useTraditionalFormat);
+// 	return /^\s*PROCEDURE\s+DIVISION/i.test(codeArea);
+// }
+
+/**
+ * Verifica se uma linha é DATA DIVISION
+ * @param {string} line
+ * @param {boolean} useTraditionalFormat
+ * @returns {boolean}
+ */
+function isDataDivision(line, useTraditionalFormat = true) {
+	const codeArea = getCobolCodeArea(line, useTraditionalFormat);
+	return /^\s*DATA\s+DIVISION/i.test(codeArea);
+}
+
+/**
+ * Verifica se uma linha é WORKING-STORAGE SECTION
+ * @param {string} line
+ * @param {boolean} useTraditionalFormat
+ * @returns {boolean}
+ */
+function isWorkingStorageSection(line, useTraditionalFormat = true) {
+	const codeArea = getCobolCodeArea(line, useTraditionalFormat);
+	return /^\s*WORKING-STORAGE\s+SECTION/i.test(codeArea);
+}
+
+/**
+ * Verifica se uma linha é LINKAGE SECTION
+ * @param {string} line
+ * @param {boolean} useTraditionalFormat
+ * @returns {boolean}
+ */
+function isLinkageSection(line, useTraditionalFormat = true) {
+	const codeArea = getCobolCodeArea(line, useTraditionalFormat);
+	return /^\s*LINKAGE\s+SECTION/i.test(codeArea);
+}
+
+/**
+ * Verifica se uma linha é FILE-CONTROL
+ * @param {string} line
+ * @param {boolean} useTraditionalFormat
+ * @returns {boolean}
+ */
+function isFileControl(line, useTraditionalFormat = true) {
+	const codeArea = getCobolCodeArea(line, useTraditionalFormat);
+	return /^\s*FILE-CONTROL/i.test(codeArea);
+}
+
 // Função reservada para otimizações futuras - parsing centralizado
 /*
 function parseCobolDocument(text) {
@@ -275,9 +330,10 @@ function extractLevel88Conditions(lines, varLine, varLevel) {
 /**
  * Extrai todos os níveis 88 declarados no código COBOL
  * @param {string} text
+ * @param {boolean} useTraditionalFormat
  * @returns {Map<string, {line: number, column: number, isLinkage: boolean}>}
  */
-function extractLevel88Declarations(text) {
+function extractLevel88Declarations(text, useTraditionalFormat = true) {
 	const level88s = new Map();
 	const lines = text.split('\n');
 
@@ -291,14 +347,14 @@ function extractLevel88Declarations(text) {
 		const line = lines[i];
 
 		// Detecta início da DATA DIVISION
-		if (/^\s*DATA\s+DIVISION/i.test(line)) {
+		if (isDataDivision(line, useTraditionalFormat)) {
 			inDataDivision = true;
 			inProcedureDivision = false;
 			continue;
 		}
 
 		// Detecta início da LINKAGE SECTION
-		if (/^\s*LINKAGE\s+SECTION/i.test(line)) {
+		if (isLinkageSection(line, useTraditionalFormat)) {
 			inLinkageSection = true;
 			continue;
 		}
@@ -404,9 +460,10 @@ function isLevel88Used(text, conditionName) {
 /**
  * Extrai variáveis declaradas no código COBOL
  * @param {string} text
+ * @param {boolean} useTraditionalFormat
  * @returns {Map<string, {line: number, column: number, isLinkage: boolean, level88Conditions: string[]}>}
  */
-function extractDeclaredVariables(text) {
+function extractDeclaredVariables(text, useTraditionalFormat = true) {
 	const variables = new Map();
 	const lines = text.split('\n');
 
@@ -419,20 +476,21 @@ function extractDeclaredVariables(text) {
 
 
 		// Detecta início da DATA DIVISION
-		if (/^\s*DATA\s+DIVISION/i.test(line)) {
+		if (isDataDivision(line, useTraditionalFormat)) {
 			inDataDivision = true;
 			inProcedureDivision = false;
 			continue;
 		}
 
 		// Detecta início da LINKAGE SECTION
-		if (/^\s*LINKAGE\s+SECTION/i.test(line)) {
+		if (isLinkageSection(line, useTraditionalFormat)) {
 			inLinkageSection = true;
 			continue;
 		}
 
 		// Detecta início de outras seções (sai da LINKAGE SECTION)
-		if (inDataDivision && /^\s*(WORKING-STORAGE|FILE|LOCAL-STORAGE|SCREEN|REPORT)\s+SECTION/i.test(line)) {
+		const codeArea = getCobolCodeArea(line, useTraditionalFormat);
+		if (inDataDivision && /^\s*(WORKING-STORAGE|FILE|LOCAL-STORAGE|SCREEN|REPORT)\s+SECTION/i.test(codeArea)) {
 			inLinkageSection = false;
 			continue;
 		}
@@ -485,9 +543,10 @@ function extractDeclaredVariables(text) {
  * @param {string} varName
  * @param {boolean} isLinkage - Se true, verifica uso também na LINKAGE SECTION
  * @param {string[]} level88Conditions - Condições de nível 88 associadas à variável
+ * @param {boolean} useTraditionalFormat
  * @returns {boolean}
  */
-function isVariableUsed(text, varName, isLinkage = false, level88Conditions = []) {
+function isVariableUsed(text, varName, isLinkage = false, level88Conditions = [], useTraditionalFormat = true) {
 	const lines = text.split('\n');
 	let inProcedureDivision = false;
 	let inLinkageSection = false;
@@ -499,21 +558,22 @@ function isVariableUsed(text, varName, isLinkage = false, level88Conditions = []
 		const line = lines[i];
 
 		// Detecta início da DATA DIVISION
-		if (/^\s*DATA\s+DIVISION/i.test(line)) {
+		if (isDataDivision(line, useTraditionalFormat)) {
 			inDataDivision = true;
 			inProcedureDivision = false;
 			continue;
 		}
 
 		// Detecta início da LINKAGE SECTION
-		if (/^\s*LINKAGE\s+SECTION/i.test(line)) {
+		if (isLinkageSection(line, useTraditionalFormat)) {
 			inLinkageSection = true;
 			linkageSectionStartLine = i;
 			continue;
 		}
 
 		// Detecta início de outras seções (sai da LINKAGE SECTION)
-		if (inDataDivision && /^\s*(WORKING-STORAGE|FILE|LOCAL-STORAGE|SCREEN|REPORT)\s+SECTION/i.test(line)) {
+		const codeArea = getCobolCodeArea(line, useTraditionalFormat);
+		if (inDataDivision && /^\s*(WORKING-STORAGE|FILE|LOCAL-STORAGE|SCREEN|REPORT)\s+SECTION/i.test(codeArea)) {
 			inLinkageSection = false;
 			continue;
 		}
@@ -1149,14 +1209,15 @@ function extractFileDeclarations(text, useTraditionalFormat = true) {
 		const line = lines[i];
 
 		// Detecta início da FILE-CONTROL
-		if (/^\s*FILE-CONTROL/i.test(line)) {
+		if (isFileControl(line, useTraditionalFormat)) {
 			inFileControl = true;
 			debugLog(`FILE-CONTROL encontrado na linha ${i}`);
 			continue;
 		}
 
 		// Detecta fim da FILE-CONTROL (quando encontra outra seção ou divisão)
-		if (inFileControl && /^\s*(I-O-CONTROL|DATA\s+DIVISION|PROCEDURE\s+DIVISION)/i.test(line)) {
+		const codeArea = getCobolCodeArea(line, useTraditionalFormat);
+		if (inFileControl && /^\s*(I-O-CONTROL|DATA\s+DIVISION|PROCEDURE\s+DIVISION)/i.test(codeArea)) {
 			inFileControl = false;
 			debugLog(`Fim de FILE-CONTROL na linha ${i}`);
 			continue;
@@ -1738,12 +1799,12 @@ function validateCobolDocument(document) {
 	// Validação de variáveis não utilizadas
 	const enableUnusedVarCheck = config.get('enableUnusedVariableCheck', true);
 	if (enableUnusedVarCheck) {
-		const declaredVariables = extractDeclaredVariables(text);
+		const declaredVariables = extractDeclaredVariables(text, useTraditionalFormat);
 		debugLog('Variáveis declaradas:', Array.from(declaredVariables.keys()));
 
 		// Verifica cada variável declarada
 		for (const [varName, position] of declaredVariables) {
-			const isUsed = isVariableUsed(text, varName, position.isLinkage, position.level88Conditions);
+			const isUsed = isVariableUsed(text, varName, position.isLinkage, position.level88Conditions, useTraditionalFormat);
 			debugLog(`Variável ${varName} (${position.isLinkage ? 'LINKAGE' : 'WORKING-STORAGE'}): ${isUsed ? 'USADA' : 'NÃO USADA'}`);
 
 			// Se a variável tem níveis 88, mostra-os
@@ -1775,7 +1836,7 @@ function validateCobolDocument(document) {
 	// Validação de níveis 88 não utilizados
 	const enableUnusedLevel88Check = config.get('enableUnusedLevel88Check', true);
 	if (enableUnusedLevel88Check) {
-		const declaredLevel88s = extractLevel88Declarations(text);
+		const declaredLevel88s = extractLevel88Declarations(text, useTraditionalFormat);
 		debugLog('Níveis 88 declarados:', Array.from(declaredLevel88s.keys()));
 
 		// Verifica cada nível 88 declarado
@@ -2696,6 +2757,10 @@ function activate(context) {
 				return;
 			}
 
+			// Detecta o formato do ficheiro
+			const text = document.getText();
+			const useTraditionalFormat = hasSequenceNumbers(text);
+
 			// Check if a constant with the same value already exists
 			let existingConstant = null;
 			let workingStorageLine = -1;
@@ -2704,15 +2769,16 @@ function activate(context) {
 
 		for (let i = 0; i < document.lineCount; i++) {
 			const line = document.lineAt(i).text;
+			const codeArea = getCobolCodeArea(line, useTraditionalFormat);
 
-			if (/^\s*WORKING-STORAGE\s+SECTION/i.test(line)) {
+			if (isWorkingStorageSection(line, useTraditionalFormat)) {
 				workingStorageLine = i;
 				inWorkingStorage = true;
 				continue;
 			}
 
 			// Se encontrar outra seção, sai da WORKING-STORAGE
-			if (inWorkingStorage && /^\s*(LINKAGE|LOCAL-STORAGE|FILE|SCREEN)\s+SECTION/i.test(line)) {
+			if (inWorkingStorage && /^\s*(LINKAGE|LOCAL-STORAGE|FILE|SCREEN)\s+SECTION/i.test(codeArea)) {
 				inWorkingStorage = false;
 			}
 
@@ -2722,7 +2788,6 @@ function activate(context) {
 			}
 
 			// Verifica se já existe uma constante com o mesmo valor
-			const codeArea = getCobolCodeArea(line);
 			if (inWorkingStorage && /^\s*01\s+/i.test(codeArea)) {
 				const valueMatch = codeArea.match(/^\s*01\s+([A-Z0-9][\w-]*)\s+.*VALUE\s+(.+?)\.?\s*$/i);
 				if (valueMatch) {

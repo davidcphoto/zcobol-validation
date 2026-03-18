@@ -4,6 +4,33 @@ All notable changes to the "zcobol-validation" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [1.2.2] - 2026-03-18
+
+### Added
+- **Free Format COBOL Support**: Automatic detection of COBOL format
+  - Supports traditional format (with sequence numbers in columns 1-6)
+  - Supports free format (without sequence numbers)
+  - Automatic format detection based on file content (70% threshold)
+  - All validations now work correctly in both formats
+
+### Fixed
+- **Column Position Corrections**: Fixed incorrect error marking positions
+  - Corrected column offset calculation (column 7 instead of 6 for traditional format)
+  - Symbolic operators (=, <, >, etc.) now marked at correct position
+  - QuickFix replacements now occur at the correct location
+
+- **Section Detection with Sequence Numbers**: Fixed validations not working when DATA DIVISION and other sections had text in columns 1-7
+  - Added helper functions: `isProcedureDivision()`, `isDataDivision()`, `isWorkingStorageSection()`, `isLinkageSection()`, `isFileControl()`
+  - All section detections now use `getCobolCodeArea()` to properly ignore columns 1-7
+  - Variable extraction and file declarations now work correctly regardless of sequence numbers
+
+### Improved
+- **Code Organization**: Better structured code for COBOL format handling
+  - New `hasSequenceNumbers()` function for format detection
+  - New `getColumnOffset()` function for consistent column calculations
+  - Updated all validation functions to accept `useTraditionalFormat` parameter
+  - More maintainable and consistent codebase
+
 ## [1.2.1] - 2026-03-14
 - **Ignore sequence numbers**: Ignore sequence numbers on the validations
 
