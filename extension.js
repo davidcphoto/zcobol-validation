@@ -127,10 +127,10 @@ function getColumnOffset(useTraditionalFormat) {
  * @param {boolean} useTraditionalFormat
  * @returns {boolean}
  */
-// function isProcedureDivision(line, useTraditionalFormat = true) {
-// 	const codeArea = getCobolCodeArea(line, useTraditionalFormat);
-// 	return /^\s*PROCEDURE\s+DIVISION/i.test(codeArea);
-// }
+function isProcedureDivision(line, useTraditionalFormat = true) {
+	const codeArea = getCobolCodeArea(line, useTraditionalFormat);
+	return /^\s*PROCEDURE\s+DIVISION/i.test(codeArea);
+}
 
 /**
  * Verifica se uma linha é DATA DIVISION
@@ -414,9 +414,10 @@ function extractLevel88Declarations(text, useTraditionalFormat = true) {
  * Verifica se um nível 88 é utilizado no código
  * @param {string} text
  * @param {string} conditionName
+ * @param {boolean} useTraditionalFormat
  * @returns {boolean}
  */
-function isLevel88Used(text, conditionName) {
+function isLevel88Used(text, conditionName, useTraditionalFormat = true) {
 	const lines = text.split('\n');
 	let inProcedureDivision = false;
 	let procedureDivisionStartLine = -1;
@@ -425,7 +426,7 @@ function isLevel88Used(text, conditionName) {
 		const line = lines[i];
 
 		// Detecta início da PROCEDURE DIVISION
-		if (/^\s*PROCEDURE\s+DIVISION/i.test(line)) {
+		if (isProcedureDivision(line, useTraditionalFormat)) {
 			inProcedureDivision = true;
 			procedureDivisionStartLine = i;
 			continue;
@@ -434,21 +435,21 @@ function isLevel88Used(text, conditionName) {
 		// Procura uso do nível 88 na PROCEDURE DIVISION
 		if (inProcedureDivision && i > procedureDivisionStartLine) {
 			// Ignora comentários
-			if (line.length > 6 && line[6] === '*') {
+			if (isCobolComment(line, useTraditionalFormat)) {
 				continue;
 			}
 
 			// Ignora a linha de declaração (na DATA DIVISION)
-			const codeArea = getCobolCodeArea(line);
+			const codeArea = getCobolCodeArea(line, useTraditionalFormat);
 			const isDeclaration = codeArea.match(/^\s*88\s+/i);
 			if (isDeclaration) {
 				continue;
 			}
 
-			// Procura o nível 88 como palavra completa
+			// Procura o nível 88 como palavra completa na área de código
 			const regex = new RegExp('\\b' + conditionName.replace(/-/g, '\\-') + '\\b', 'i');
-			if (regex.test(line)) {
-				debugLog(`Nível 88 ${conditionName} encontrado na linha ${i}: ${line.trim()}`);
+			if (regex.test(codeArea)) {
+				debugLog(`Nível 88 ${conditionName} encontrado na linha ${i}: ${codeArea.trim()}`);
 				return true;
 			}
 		}
@@ -579,7 +580,7 @@ function isVariableUsed(text, varName, isLinkage = false, level88Conditions = []
 		}
 
 		// Detecta início da PROCEDURE DIVISION
-		if (/^\s*PROCEDURE\s+DIVISION/i.test(line)) {
+		if (isProcedureDivision(line, useTraditionalFormat)) {
 			inProcedureDivision = true;
 			inLinkageSection = false;
 			inDataDivision = false;
@@ -591,22 +592,25 @@ function isVariableUsed(text, varName, isLinkage = false, level88Conditions = []
 		// Procura uso da variável na PROCEDURE DIVISION
 		if (inProcedureDivision && i > procedureDivisionStartLine) {
 			// Ignora comentários
-			if (isCobolComment(line)) {
+			if (isCobolComment(line, useTraditionalFormat)) {
 				continue;
 			}
 
+			// Extrai área de código
+			const codeArea = getCobolCodeArea(line, useTraditionalFormat);
+
 			// Procura a variável como palavra completa (não parte de outra palavra)
 			const regex = new RegExp('\\b' + varName.replace(/-/g, '\\-') + '\\b', 'i');
-			if (regex.test(line)) {
-				debugLog(`Variável ${varName} encontrada na linha ${i}: ${line.trim()}`);
+			if (regex.test(codeArea)) {
+				debugLog(`Variável ${varName} encontrada na linha ${i}: ${codeArea.trim()}`);
 				return true;
 			}
 
 			// Verifica se alguma das condições de nível 88 é usada
 			for (const condition of level88Conditions) {
 				const conditionRegex = new RegExp('\\b' + condition.replace(/-/g, '\\-') + '\\b', 'i');
-				if (conditionRegex.test(line)) {
-					debugLog(`Condição nível 88 ${condition} da variável ${varName} encontrada na linha ${i}: ${line.trim()}`);
+				if (conditionRegex.test(codeArea)) {
+					debugLog(`Condição nível 88 ${condition} da variável ${varName} encontrada na linha ${i}: ${codeArea.trim()}`);
 					return true;
 				}
 			}
@@ -615,12 +619,12 @@ function isVariableUsed(text, varName, isLinkage = false, level88Conditions = []
 		// Se é variável da LINKAGE SECTION, verifica uso também na própria LINKAGE SECTION
 		if (isLinkage && inLinkageSection && i > linkageSectionStartLine) {
 			// Ignora comentários
-			if (isCobolComment(line)) {
+			if (isCobolComment(line, useTraditionalFormat)) {
 				continue;
 			}
 
 			// Ignora a linha de declaração da própria variável
-			const codeArea = getCobolCodeArea(line);
+			const codeArea = getCobolCodeArea(line, useTraditionalFormat);
 			const isDeclaration = codeArea.match(new RegExp('^\\s*(01|0[2-9]|[1-4][0-9]|77)\\s+' + varName.replace(/-/g, '\\-') + '\\b', 'i'));
 			if (isDeclaration) {
 				continue;
@@ -628,16 +632,16 @@ function isVariableUsed(text, varName, isLinkage = false, level88Conditions = []
 
 			// Procura a variável como palavra completa (não parte de outra palavra)
 			const regex = new RegExp('\\b' + varName.replace(/-/g, '\\-') + '\\b', 'i');
-			if (regex.test(line)) {
-				debugLog(`Variável ${varName} encontrada na LINKAGE SECTION na linha ${i}: ${line.trim()}`);
+			if (regex.test(codeArea)) {
+				debugLog(`Variável ${varName} encontrada na LINKAGE SECTION na linha ${i}: ${codeArea.trim()}`);
 				return true;
 			}
 
 			// Verifica se alguma das condições de nível 88 é usada na LINKAGE SECTION
 			for (const condition of level88Conditions) {
 				const conditionRegex = new RegExp('\\b' + condition.replace(/-/g, '\\-') + '\\b', 'i');
-				if (conditionRegex.test(line)) {
-					debugLog(`Condição nível 88 ${condition} da variável ${varName} encontrada na LINKAGE SECTION na linha ${i}: ${line.trim()}`);
+				if (conditionRegex.test(codeArea)) {
+					debugLog(`Condição nível 88 ${condition} da variável ${varName} encontrada na LINKAGE SECTION na linha ${i}: ${codeArea.trim()}`);
 					return true;
 				}
 			}
@@ -1841,7 +1845,7 @@ function validateCobolDocument(document) {
 
 		// Verifica cada nível 88 declarado
 		for (const [conditionName, position] of declaredLevel88s) {
-			const isUsed = isLevel88Used(text, conditionName);
+			const isUsed = isLevel88Used(text, conditionName, useTraditionalFormat);
 			debugLog(`Nível 88 ${conditionName}: ${isUsed ? 'USADO' : 'NÃO USADO'}`);
 
 			if (!isUsed) {
