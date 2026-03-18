@@ -4,6 +4,9 @@ All notable changes to the "zcobol-validation" extension will be documented in t
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [1.2.1] - 2026-03-14
+- **Ignore sequence numbers**: Ignore sequence numbers on the validations
+
 ## [1.2.0] - 2026-03-14
 
 ### Performance Improvements

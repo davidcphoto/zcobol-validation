@@ -31,6 +31,96 @@ function simpleHash(text) {
 	return hash;
 }
 
+/**
+ * Detecta se o ficheiro COBOL usa formato tradicional com números de sequência
+ * @param {string} text - O texto completo do documento
+ * @returns {boolean} - true se usa formato tradicional (colunas 1-6 com números)
+ */
+function hasSequenceNumbers(text) {
+	const lines = text.split('\n');
+	let linesWithNumbers = 0;
+	let nonEmptyLines = 0;
+
+	// Verifica as primeiras 50 linhas não vazias (ou menos se o arquivo for pequeno)
+	for (let i = 0; i < Math.min(lines.length, 100); i++) {
+		const line = lines[i];
+		if (line.trim().length === 0) continue;
+
+		nonEmptyLines++;
+		if (nonEmptyLines > 50) break;
+
+		// Se a linha tem pelo menos 6 caracteres e os primeiros 6 são todos dígitos
+		if (line.length >= 6 && /^\d{6}/.test(line)) {
+			linesWithNumbers++;
+		}
+	}
+
+	// Se mais de 70% das linhas têm números de sequência, considera formato tradicional
+	const hasSeqNum = nonEmptyLines > 0 && (linesWithNumbers / nonEmptyLines) > 0.7;
+	console.log(`[zCobol] Detecção de formato: ${linesWithNumbers}/${nonEmptyLines} linhas com números = ${hasSeqNum ? 'TRADICIONAL' : 'LIVRE'}`);
+	return hasSeqNum;
+}
+
+/**
+ * Extrai a área de código válida de uma linha COBOL.
+ * No formato COBOL tradicional:
+ * - Colunas 1-6: Número de sequência (ignorado)
+ * - Coluna 7: Indicador (*, /, D, -, ou espaço)
+ * - Colunas 8-72: Área de código (única área válida)
+ * - Colunas 73-80: Identificação (ignorada)
+ * No formato livre: usa a linha toda
+ *
+ * @param {string} line - A linha completa do código COBOL
+ * @param {boolean} useTraditionalFormat - Se true, usa formato tradicional com colunas
+ * @returns {string} - O conteúdo da área de código
+ */
+function getCobolCodeArea(line, useTraditionalFormat = true) {
+	if (!useTraditionalFormat) {
+		// Formato livre - usa a linha toda
+		return line;
+	}
+
+	// Formato tradicional
+	// Se a linha tem menos de 8 caracteres, não há área de código
+	if (line.length < 8) {
+		return '';
+	}
+
+	// Extrai colunas 8-72 (índices 7-71 em JavaScript, base-0)
+	// Se a linha for menor que 72 colunas, pega até o final
+	const endIndex = Math.min(line.length, 72);
+	return line.substring(7, endIndex);
+}
+
+/**
+ * Verifica se uma linha COBOL é um comentário
+ * @param {string} line - A linha completa do código COBOL
+ * @param {boolean} useTraditionalFormat - Se true, usa formato tradicional (coluna 7 = '*' ou '/')
+ * @returns {boolean} - true se a linha é um comentário
+ */
+function isCobolComment(line, useTraditionalFormat = true) {
+	if (!useTraditionalFormat) {
+		// Formato livre - comentário começa com * no início (após whitespace)
+		return /^\s*\*/.test(line);
+	}
+
+	// Formato tradicional
+	if (line.length < 7) {
+		return false;
+	}
+	const indicator = line[6]; // Coluna 7 (índice 6)
+	return indicator === '*' || indicator === '/';
+}
+
+/**
+ * Calcula o offset da coluna baseado no formato
+ * @param {boolean} useTraditionalFormat
+ * @returns {number} - Offset a adicionar ao índice do match para obter a coluna real
+ */
+function getColumnOffset(useTraditionalFormat) {
+	return useTraditionalFormat ? 7 : 0;
+}
+
 // Função reservada para otimizações futuras - parsing centralizado
 /*
 function parseCobolDocument(text) {
@@ -105,7 +195,8 @@ function isGroupVariable(lines, varLine, varLevel) {
 	// Se a próxima linha é um COPY, considera como grupo (variável estrutural)
 	if (varLine + 1 < lines.length) {
 		const nextLine = lines[varLine + 1];
-		if (/^\s{6,}\s*COPY\s+/i.test(nextLine)) {
+		const nextCodeArea = getCobolCodeArea(nextLine);
+		if (/^\s*COPY\s+/i.test(nextCodeArea)) {
 			return true;
 		}
 	}
@@ -120,7 +211,8 @@ function isGroupVariable(lines, varLine, varLevel) {
 		}
 
 		// Procura declaração de variável
-		const nextVarMatch = line.match(/^\s{6,}\s*(01|0[2-9]|[1-4][0-9]|77|88)\s+/i);
+		const codeArea = getCobolCodeArea(line);
+		const nextVarMatch = codeArea.match(/^\s*(01|0[2-9]|[1-4][0-9]|77|88)\s+/i);
 		if (nextVarMatch) {
 			const nextLevel = parseInt(nextVarMatch[1]);
 
@@ -154,7 +246,8 @@ function extractLevel88Conditions(lines, varLine, varLevel) {
 		const line = lines[i];
 
 		// Verifica se é uma declaração de nível
-		const levelMatch = line.match(/^\s{6,}\s*(01|0[2-9]|[1-4][0-9]|77|88)\s+([A-Z0-9][\w-]*)/i);
+		const codeArea = getCobolCodeArea(line);
+		const levelMatch = codeArea.match(/^\s*(01|0[2-9]|[1-4][0-9]|77|88)\s+([A-Z0-9][\w-]*)/i);
 		if (levelMatch) {
 			const level = parseInt(levelMatch[1]);
 			const name = levelMatch[2].toUpperCase();
@@ -227,7 +320,8 @@ function extractLevel88Declarations(text) {
 		// Se estamos na DATA DIVISION, procura declarações de nível 88
 		if (inDataDivision && !inProcedureDivision) {
 			// Verifica se é uma declaração de variável (não nível 88)
-			const varMatch = line.match(/^\s{6,}\s*(01|0[2-9]|[1-4][0-9]|77)\s+([A-Z0-9][\w-]*)/i);
+			const codeArea = getCobolCodeArea(line);
+			const varMatch = codeArea.match(/^\s*(01|0[2-9]|[1-4][0-9]|77)\s+([A-Z0-9][\w-]*)/i);
 			if (varMatch) {
 				lastParentLevel = parseInt(varMatch[1]);
 				lastParentVar = varMatch[2].toUpperCase();
@@ -235,7 +329,7 @@ function extractLevel88Declarations(text) {
 			}
 
 			// Procura declarações de nível 88
-			const level88Match = line.match(/^\s{6,}\s*88\s+([A-Z0-9][\w-]*)/i);
+			const level88Match = codeArea.match(/^\s*88\s+([A-Z0-9][\w-]*)/i);
 			if (level88Match) {
 				const conditionName = level88Match[1].toUpperCase();
 
@@ -289,7 +383,8 @@ function isLevel88Used(text, conditionName) {
 			}
 
 			// Ignora a linha de declaração (na DATA DIVISION)
-			const isDeclaration = line.match(/^\s{6,}\s*88\s+/i);
+			const codeArea = getCobolCodeArea(line);
+			const isDeclaration = codeArea.match(/^\s*88\s+/i);
 			if (isDeclaration) {
 				continue;
 			}
@@ -353,7 +448,8 @@ function extractDeclaredVariables(text) {
 		// Se estamos na DATA DIVISION, procura declarações de variáveis
 		if (inDataDivision && !inProcedureDivision) {
 			// Procura por declarações de variáveis (nível 01-49, 77, 88)
-			const varMatch = line.match(/^\s{6,}\s*(01|0[2-9]|[1-4][0-9]|77)\s+([A-Z0-9][\w-]*)/i);
+			const codeArea = getCobolCodeArea(line);
+			const varMatch = codeArea.match(/^\s*(01|0[2-9]|[1-4][0-9]|77)\s+([A-Z0-9][\w-]*)/i);
 			if (varMatch) {
 				const varLevel = parseInt(varMatch[1]);
 				const varName = varMatch[2].toUpperCase();
@@ -435,7 +531,7 @@ function isVariableUsed(text, varName, isLinkage = false, level88Conditions = []
 		// Procura uso da variável na PROCEDURE DIVISION
 		if (inProcedureDivision && i > procedureDivisionStartLine) {
 			// Ignora comentários
-			if (line.length > 6 && line[6] === '*') {
+			if (isCobolComment(line)) {
 				continue;
 			}
 
@@ -459,12 +555,13 @@ function isVariableUsed(text, varName, isLinkage = false, level88Conditions = []
 		// Se é variável da LINKAGE SECTION, verifica uso também na própria LINKAGE SECTION
 		if (isLinkage && inLinkageSection && i > linkageSectionStartLine) {
 			// Ignora comentários
-			if (line.length > 6 && line[6] === '*') {
+			if (isCobolComment(line)) {
 				continue;
 			}
 
 			// Ignora a linha de declaração da própria variável
-			const isDeclaration = line.match(new RegExp('^\\s{6,}\\s*(01|0[2-9]|[1-4][0-9]|77)\\s+' + varName.replace(/-/g, '\\-') + '\\b', 'i'));
+			const codeArea = getCobolCodeArea(line);
+			const isDeclaration = codeArea.match(new RegExp('^\\s*(01|0[2-9]|[1-4][0-9]|77)\\s+' + varName.replace(/-/g, '\\-') + '\\b', 'i'));
 			if (isDeclaration) {
 				continue;
 			}
@@ -495,7 +592,7 @@ function isVariableUsed(text, varName, isLinkage = false, level88Conditions = []
  * @param {string} text
  * @returns {Array<{line: number, column: number, length: number}>}
  */
-function findUnprotectedDisplays(text) {
+function findUnprotectedDisplays(text, useTraditionalFormat = true) {
 	const displays = [];
 	const lines = text.split('\n');
 	let inProcedureDivision = false;
@@ -515,18 +612,19 @@ function findUnprotectedDisplays(text) {
 		}
 
 		// Ignora comentários
-		if (line.length > 6 && line[6] === '*') {
+		if (isCobolComment(line, useTraditionalFormat)) {
 			continue;
 		}
 
 		// Detecta início de IF
-		if (/^\s*IF\s+/i.test(line.substring(6))) {
+		const codeArea = getCobolCodeArea(line, useTraditionalFormat);
+		if (/^\s*IF\s+/i.test(codeArea)) {
 			ifNestingLevel++;
 			debugLog(`IF encontrado na linha ${i}, nível: ${ifNestingLevel}`);
 		}
 
 		// Detecta fim de IF
-		if (/^\s*END-IF/i.test(line.substring(6))) {
+		if (/^\s*END-IF/i.test(codeArea)) {
 			if (ifNestingLevel > 0) {
 				ifNestingLevel--;
 			}
@@ -534,7 +632,7 @@ function findUnprotectedDisplays(text) {
 		}
 
 		// Detecta DISPLAY fora de blocos IF
-		const displayMatch = line.substring(6).match(/^\s*(DISPLAY\s+)/i);
+		const displayMatch = codeArea.match(/^\s*(DISPLAY\s+)/i);
 		if (displayMatch && ifNestingLevel === 0) {
 			const column = line.indexOf(displayMatch[1]);
 			displays.push({
@@ -553,12 +651,14 @@ function findUnprotectedDisplays(text) {
  * Verifica uso de símbolos (<, >, =) em condições IF e WHEN
  * @param {string} text
  * @param {boolean} useShortForm - Se true, usa LESS OR EQUAL e GREATER OR EQUAL em vez das formas longas
+ * @param {boolean} useTraditionalFormat - Se true, usa formato COBOL tradicional com colunas
  * @returns {Array<{line: number, column: number, length: number, operator: string, replacement: string}>}
  */
-function findSymbolicOperatorsInIf(text, useShortForm = false) {
+function findSymbolicOperatorsInIf(text, useShortForm = false, useTraditionalFormat = true) {
 	const operators = [];
 	const lines = text.split('\n');
 	let inProcedureDivision = false;
+	const columnOffset = getColumnOffset(useTraditionalFormat);
 
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i];
@@ -574,11 +674,11 @@ function findSymbolicOperatorsInIf(text, useShortForm = false) {
 		}
 
 		// Ignora comentários
-		if (line.length > 6 && line[6] === '*') {
+		if (isCobolComment(line, useTraditionalFormat)) {
 			continue;
 		}
 
-		const lineContent = line.substring(6);
+		const lineContent = getCobolCodeArea(line, useTraditionalFormat);
 
 		// Procura linhas com IF ou WHEN
 		if (/^\s*(IF|WHEN)\s+/i.test(lineContent)) {
@@ -621,12 +721,12 @@ function findSymbolicOperatorsInIf(text, useShortForm = false) {
 				const nextLine = lines[nextIndex];
 
 				// Se é comentário, pula mas continua verificando
-				if (nextLine.length > 6 && nextLine[6] === '*') {
+				if (isCobolComment(nextLine, useTraditionalFormat)) {
 					currentIndex++;
 					continue;
 				}
 
-				const nextLineContent = nextLine.substring(6);
+				const nextLineContent = getCobolCodeArea(nextLine, useTraditionalFormat);
 
 				// Se a próxima linha inicia um novo comando ou parágrafo, fim da condição
 				if (/^\s{0,3}[A-Z0-9][A-Z0-9-]*\s*\./i.test(nextLineContent) ||
@@ -647,13 +747,16 @@ function findSymbolicOperatorsInIf(text, useShortForm = false) {
 				for (const match of stringMatches) {
 					lineWithoutStrings = lineWithoutStrings.replace(match[0], '""');
 				}
+				console.log('[zCobol]   Processando condição linha', lineIndex);
+				console.log('[zCobol]     Original:', content);
+				console.log('[zCobol]     Sem strings:', lineWithoutStrings);
 
 				// Procura cada tipo de operador
 				for (const pattern of symbolPatterns) {
 					const matches = [...lineWithoutStrings.matchAll(pattern.regex)];
 					for (const match of matches) {
 						const matchIndex = match.index;
-						const column = 6 + matchIndex;
+						const column = columnOffset + matchIndex;
 						operators.push({
 							line: lineIndex,
 							column: column,
@@ -679,7 +782,7 @@ function findSymbolicOperatorsInIf(text, useShortForm = false) {
  * @param {string} text
  * @returns {Array<{line: number, column: number, length: number, target: string}>}
  */
-function findGoToStatements(text) {
+function findGoToStatements(text, useTraditionalFormat = true) {
 	const gotos = [];
 	const lines = text.split('\n');
 	let inProcedureDivision = false;
@@ -698,12 +801,13 @@ function findGoToStatements(text) {
 		}
 
 		// Ignora comentários
-		if (line.length > 6 && line[6] === '*') {
+		if (isCobolComment(line, useTraditionalFormat)) {
 			continue;
 		}
 
 		// Detecta GO TO (com ou sem espaço: "GO TO" ou "GOTO")
-		const gotoMatch = line.substring(6).match(/^\s*(GO\s*TO\s+([A-Z0-9][\w-]*))/i);
+		const lineContent = getCobolCodeArea(line, useTraditionalFormat);
+		const gotoMatch = lineContent.match(/^\s*(GO\s*TO\s+([A-Z0-9][\w-]*))/i);
 		if (gotoMatch) {
 			const column = line.indexOf(gotoMatch[1]);
 			const target = gotoMatch[2] || '';
@@ -723,9 +827,10 @@ function findGoToStatements(text) {
 /**
  * Verifica IFs sem END-IF correspondente
  * @param {string} text
+ * @param {boolean} useTraditionalFormat
  * @returns {Array<{line: number, column: number, length: number}>}
  */
-function findUnmatchedIfs(text) {
+function findUnmatchedIfs(text, useTraditionalFormat = true) {
 	const lines = text.split('\n');
 	let inProcedureDivision = false;
 	const ifStack = []; // Stack para rastrear IFs
@@ -744,11 +849,11 @@ function findUnmatchedIfs(text) {
 		}
 
 		// Ignora comentários
-		if (line.length > 6 && line[6] === '*') {
+		if (isCobolComment(line, useTraditionalFormat)) {
 			continue;
 		}
 
-		const lineContent = line.substring(6);
+		const lineContent = getCobolCodeArea(line, useTraditionalFormat);
 
 		// Detecta IF (mas não END-IF)
 		const ifMatch = lineContent.match(/^\s*(IF\s+)/i);
@@ -788,9 +893,10 @@ function findUnmatchedIfs(text) {
 /**
  * Verifica IFs sem ELSE correspondente
  * @param {string} text
+ * @param {boolean} useTraditionalFormat
  * @returns {Array<{line: number, column: number, length: number}>}
  */
-function findIfsWithoutElse(text) {
+function findIfsWithoutElse(text, useTraditionalFormat = true) {
 	const ifsWithoutElse = [];
 	const lines = text.split('\n');
 	let inProcedureDivision = false;
@@ -809,11 +915,11 @@ function findIfsWithoutElse(text) {
 		}
 
 		// Ignora comentários
-		if (line.length > 6 && line[6] === '*') {
+		if (isCobolComment(line, useTraditionalFormat)) {
 			continue;
 		}
 
-		const lineContent = line.substring(6);
+		const lineContent = getCobolCodeArea(line, useTraditionalFormat);
 
 		// Detecta IF (mas não END-IF)
 		const ifMatch = lineContent.match(/^\s*(IF\s+)/i);
@@ -833,11 +939,11 @@ function findIfsWithoutElse(text) {
 				const nextLine = lines[j];
 
 				// Ignora comentários
-				if (nextLine.length > 6 && nextLine[6] === '*') {
+				if (isCobolComment(nextLine, useTraditionalFormat)) {
 					continue;
 				}
 
-				const nextLineContent = nextLine.substring(6);
+				const nextLineContent = getCobolCodeArea(nextLine, useTraditionalFormat);
 
 				// Detecta novo IF aninhado
 				if (/^\s*IF\s+/i.test(nextLineContent) && !/^\s*END-IF/i.test(nextLineContent)) {
@@ -875,7 +981,7 @@ function findIfsWithoutElse(text) {
  * @param {string} text
  * @returns {Array<{line: number, column: number, length: number}>}
  */
-function findEvaluatesWithoutWhenOther(text) {
+function findEvaluatesWithoutWhenOther(text, useTraditionalFormat = true) {
 	const evaluatesWithoutWhenOther = [];
 	const lines = text.split('\n');
 	let inProcedureDivision = false;
@@ -894,11 +1000,11 @@ function findEvaluatesWithoutWhenOther(text) {
 		}
 
 		// Ignora comentários
-		if (line.length > 6 && line[6] === '*') {
+		if (isCobolComment(line, useTraditionalFormat)) {
 			continue;
 		}
 
-		const lineContent = line.substring(6);
+		const lineContent = getCobolCodeArea(line, useTraditionalFormat);
 
 		// Detecta EVALUATE
 		const evaluateMatch = lineContent.match(/^\s*(EVALUATE\s+)/i);
@@ -918,11 +1024,11 @@ function findEvaluatesWithoutWhenOther(text) {
 				const nextLine = lines[j];
 
 				// Ignora comentários
-				if (nextLine.length > 6 && nextLine[6] === '*') {
+				if (isCobolComment(nextLine, useTraditionalFormat)) {
 					continue;
 				}
 
-				const nextLineContent = nextLine.substring(6);
+				const nextLineContent = getCobolCodeArea(nextLine, useTraditionalFormat);
 
 				// Detecta EVALUATE aninhado
 				if (/^\s*EVALUATE\s+/i.test(nextLineContent)) {
@@ -960,10 +1066,11 @@ function findEvaluatesWithoutWhenOther(text) {
  * @param {string} text
  * @returns {Array<{line: number, column: number, length: number, word: string}>}
  */
-function findLowerCaseCode(text) {
+function findLowerCaseCode(text, useTraditionalFormat = true) {
 	const lowerCaseCode = [];
 	const lines = text.split('\n');
 	let inProcedureDivision = false;
+	const columnOffset = getColumnOffset(useTraditionalFormat);
 
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i];
@@ -979,11 +1086,11 @@ function findLowerCaseCode(text) {
 		}
 
 		// Ignora comentários
-		if (line.length > 6 && line[6] === '*') {
+		if (isCobolComment(line, useTraditionalFormat)) {
 			continue;
 		}
 
-		const lineContent = line.substring(6);
+		const lineContent = getCobolCodeArea(line, useTraditionalFormat);
 
 		// Remove strings literais da linha para não validar o conteúdo delas
 		let lineWithoutStrings = lineContent;
@@ -1012,7 +1119,7 @@ function findLowerCaseCode(text) {
 
 			// Se tem pelo menos uma letra minúscula, adiciona ao resultado
 			if (/[a-z]/.test(word)) {
-				const column = 6 + matchIndex;
+				const column = columnOffset + matchIndex;
 				lowerCaseCode.push({
 					line: i,
 					column: column,
@@ -1030,9 +1137,10 @@ function findLowerCaseCode(text) {
 /**
  * Extrai declarações de ficheiros no código COBOL (SELECT statements)
  * @param {string} text
+ * @param {boolean} useTraditionalFormat
  * @returns {Map<string, {line: number, column: number}>}
  */
-function extractFileDeclarations(text) {
+function extractFileDeclarations(text, useTraditionalFormat = true) {
 	const files = new Map();
 	const lines = text.split('\n');
 	let inFileControl = false;
@@ -1057,7 +1165,7 @@ function extractFileDeclarations(text) {
 		// Se estamos na FILE-CONTROL, procura declarações SELECT
 		if (inFileControl) {
 			// Ignora comentários
-			if (line.length > 6 && line[6] === '*') {
+			if (isCobolComment(line, useTraditionalFormat)) {
 				continue;
 			}
 
@@ -1109,11 +1217,11 @@ function hasFileOperations(text, fileName) {
 		}
 
 		// Ignora comentários
-		if (line.length > 6 && line[6] === '*') {
+		if (isCobolComment(line)) {
 			continue;
 		}
 
-		const lineContent = line.substring(6);
+		const lineContent = getCobolCodeArea(line);
 
 		// Verifica OPEN com o nome do ficheiro
 		if (/^\s*OPEN\s+(INPUT|OUTPUT|I-O|EXTEND)/i.test(lineContent)) {
@@ -1158,11 +1266,12 @@ function hasFileOperations(text, fileName) {
 /**
  * Verifica ficheiros sem operações completas (OPEN, CLOSE, READ/WRITE)
  * @param {string} text
+ * @param {boolean} useTraditionalFormat
  * @returns {Array<{fileName: string, line: number, column: number, missing: string[]}>}
  */
-function findFilesWithoutOperations(text) {
+function findFilesWithoutOperations(text, useTraditionalFormat = true) {
 	const filesWithoutOps = [];
-	const declaredFiles = extractFileDeclarations(text);
+	const declaredFiles = extractFileDeclarations(text, useTraditionalFormat);
 
 	for (const [fileName, position] of declaredFiles) {
 		const operations = hasFileOperations(text, fileName);
@@ -1195,9 +1304,10 @@ function findFilesWithoutOperations(text) {
 /**
  * Extrai declarações de cursores no código COBOL (DECLARE CURSOR)
  * @param {string} text
+ * @param {boolean} useTraditionalFormat
  * @returns {Map<string, {line: number, column: number}>}
  */
-function extractCursorDeclarations(text) {
+function extractCursorDeclarations(text, useTraditionalFormat = true) {
 	const cursors = new Map();
 	const lines = text.split('\n');
 	let inExecSqlBlock = false;
@@ -1208,7 +1318,7 @@ function extractCursorDeclarations(text) {
 		const line = lines[i];
 
 		// Ignora comentários
-		if (line.length > 6 && line[6] === '*') {
+		if (isCobolComment(line, useTraditionalFormat)) {
 			continue;
 		}
 
@@ -1295,7 +1405,7 @@ function hasCursorOperations(text, cursorName) {
 		}
 
 		// Ignora comentários
-		if (line.length > 6 && line[6] === '*') {
+		if (isCobolComment(line)) {
 			continue;
 		}
 
@@ -1342,11 +1452,12 @@ function hasCursorOperations(text, cursorName) {
 /**
  * Verifica cursores sem operações completas (OPEN, FETCH, CLOSE)
  * @param {string} text
+ * @param {boolean} useTraditionalFormat
  * @returns {Array<{cursorName: string, line: number, column: number, missing: string[]}>}
  */
-function findCursorsWithoutOperations(text) {
+function findCursorsWithoutOperations(text, useTraditionalFormat = true) {
 	const cursorsWithoutOps = [];
-	const declaredCursors = extractCursorDeclarations(text);
+	const declaredCursors = extractCursorDeclarations(text, useTraditionalFormat);
 
 	for (const [cursorName, position] of declaredCursors) {
 		const operations = hasCursorOperations(text, cursorName);
@@ -1379,9 +1490,12 @@ function findCursorsWithoutOperations(text) {
 /**
  * Verifica valores hardcoded no código (strings e números literais)
  * @param {string} text
+ * @param {boolean} enableInString
+ * @param {boolean} enableInDisplay
+ * @param {boolean} useTraditionalFormat
  * @returns {Array<{line: number, column: number, length: number, value: string, type: string}>}
  */
-function findHardcodedValues(text, enableInString = false, enableInDisplay = false) {
+function findHardcodedValues(text, enableInString = false, enableInDisplay = false, useTraditionalFormat = true) {
 	const hardcoded = [];
 	const lines = text.split('\n');
 	let inProcedureDivision = false;
@@ -1406,11 +1520,11 @@ function findHardcodedValues(text, enableInString = false, enableInDisplay = fal
 		}
 
 		// Ignora comentários
-		if (line.length > 6 && line[6] === '*') {
+		if (isCobolComment(line, useTraditionalFormat)) {
 			continue;
 		}
 
-		const lineContent = line.substring(6);
+		const lineContent = getCobolCodeArea(line, useTraditionalFormat);
 
 		// Ignora linhas que definem parágrafos (nome na área A seguido de ponto)
 		// Área A começa na coluna 8 (índice 7 da linha completa, índice 1 do lineContent)
@@ -1468,13 +1582,12 @@ function findHardcodedValues(text, enableInString = false, enableInDisplay = fal
 			const nextLine = lines[nextIndex];
 
 			// Se é comentário, pula
-			if (nextLine.length > 6 && nextLine[6] === '*') {
+			if (isCobolComment(nextLine, useTraditionalFormat)) {
 				currentIndex++;
 				continue;
 			}
 
-			const nextLineContent = nextLine.substring(6);
-
+			const nextLineContent = getCobolCodeArea(nextLine, useTraditionalFormat);
 			// Se a próxima linha define um novo parágrafo ou comando, fim
 			if (/^\s{0,3}[A-Z0-9][A-Z0-9-]*\s*\./i.test(nextLineContent) ||
 			    /^\s*(MOVE|IF|WHEN|COMPUTE|EVALUATE|ADD|SUBTRACT|MULTIPLY|DIVIDE|PERFORM|DISPLAY|STRING|UNSTRING|END-IF|END-PERFORM|ELSE)\b/i.test(nextLineContent)) {
@@ -1606,6 +1719,9 @@ function validateCobolDocument(document) {
 	const uri = document.uri.toString();
 	const contentHash = simpleHash(text);
 
+	// Detecta se o ficheiro usa formato tradicional (com números de sequência)
+	const useTraditionalFormat = hasSequenceNumbers(text);
+
 	// Verifica cache - se o conteúdo não mudou, usa resultado em cache
 	const cached = validationCache.get(uri);
 	if (cached && cached.hash === contentHash) {
@@ -1691,7 +1807,7 @@ function validateCobolDocument(document) {
 	// Validação de displays não protegidos
 	const enableUnprotectedDisplayCheck = config.get('enableUnprotectedDisplayCheck', true);
 	if (enableUnprotectedDisplayCheck) {
-		const unprotectedDisplays = findUnprotectedDisplays(text);
+		const unprotectedDisplays = findUnprotectedDisplays(text, useTraditionalFormat);
 		debugLog('Displays não protegidos encontrados:', unprotectedDisplays.length);
 
 		for (const display of unprotectedDisplays) {
@@ -1717,7 +1833,7 @@ function validateCobolDocument(document) {
 	// Validação de comandos GO TO
 	const enableGoToCheck = config.get('enableGoToCheck', true);
 	if (enableGoToCheck) {
-		const gotos = findGoToStatements(text);
+		const gotos = findGoToStatements(text, useTraditionalFormat);
 		debugLog('Comandos GO TO encontrados:', gotos.length);
 
 		for (const goto of gotos) {
@@ -1743,7 +1859,7 @@ function validateCobolDocument(document) {
 	// Validação de IFs sem END-IF
 	const enableUnmatchedIfCheck = config.get('enableUnmatchedIfCheck', true);
 	if (enableUnmatchedIfCheck) {
-		const unmatchedIfs = findUnmatchedIfs(text);
+		const unmatchedIfs = findUnmatchedIfs(text, useTraditionalFormat);
 		debugLog('IFs sem END-IF encontrados:', unmatchedIfs.length);
 
 		for (const ifStatement of unmatchedIfs) {
@@ -1823,7 +1939,7 @@ function validateCobolDocument(document) {
 	if (enableSymbolicOperatorCheck) {
 		const operatorFormat = /** @type {'long' | 'short'} */ (config.get('operatorFormat', 'long'));
 		const useShortForm = operatorFormat === 'short';
-		const symbolicOperators = findSymbolicOperatorsInIf(text, useShortForm);
+		const symbolicOperators = findSymbolicOperatorsInIf(text, useShortForm, useTraditionalFormat);
 		debugLog('Operadores simbólicos encontrados:', symbolicOperators.length);
 
 		for (const op of symbolicOperators) {
@@ -1856,7 +1972,7 @@ function validateCobolDocument(document) {
 	if (enableHardcodedCheck) {
 		const enableInString = config.get('enableHardcodedInString', false);
 		const enableInDisplay = config.get('enableHardcodedInDisplay', false);
-		const hardcodedValues = findHardcodedValues(text, enableInString, enableInDisplay);
+		const hardcodedValues = findHardcodedValues(text, enableInString, enableInDisplay, useTraditionalFormat);
 		debugLog('Valores hardcoded encontrados:', hardcodedValues.length);
 
 		for (const hardcoded of hardcodedValues) {
@@ -1887,7 +2003,7 @@ function validateCobolDocument(document) {
 	// Validação de código em minúsculas
 	const enableLowerCaseCheck = config.get('enableLowerCaseCheck', false);
 	if (enableLowerCaseCheck) {
-		const lowerCaseCode = findLowerCaseCode(text);
+		const lowerCaseCode = findLowerCaseCode(text, useTraditionalFormat);
 		debugLog('Código em minúsculas encontrado:', lowerCaseCode.length);
 
 		for (const lowerCase of lowerCaseCode) {
@@ -1918,7 +2034,7 @@ function validateCobolDocument(document) {
 	// Validação de operações de ficheiro (OPEN, CLOSE, READ/WRITE)
 	const enableFileOperationsCheck = config.get('enableFileOperationsCheck', true);
 	if (enableFileOperationsCheck) {
-		const filesWithoutOps = findFilesWithoutOperations(text);
+		const filesWithoutOps = findFilesWithoutOperations(text, useTraditionalFormat);
 		debugLog('Files without complete operations:', filesWithoutOps.length);
 
 		for (const file of filesWithoutOps) {
@@ -1945,7 +2061,7 @@ function validateCobolDocument(document) {
 	// Validação de operações de cursor (OPEN, FETCH, CLOSE)
 	const enableCursorOperationsCheck = config.get('enableCursorOperationsCheck', true);
 	if (enableCursorOperationsCheck) {
-		const cursorsWithoutOps = findCursorsWithoutOperations(text);
+		const cursorsWithoutOps = findCursorsWithoutOperations(text, useTraditionalFormat);
 		debugLog('Cursors without complete operations:', cursorsWithoutOps.length);
 
 		for (const cursor of cursorsWithoutOps) {
@@ -1969,8 +2085,11 @@ function validateCobolDocument(document) {
 		}
 	}
 
-	debugLog('Total de warnings criados:', diagnostics.length);
+	console.log('[zCobol] Total de diagnósticos criados:', diagnostics.length);
+	console.log('[zCobol] Diagnostics:', diagnostics.map(d => `${d.message} at line ${d.range.start.line}`));
+	console.log('[zCobol] Chamando diagnosticCollection.set...');
 	diagnosticCollection.set(document.uri, diagnostics);
+	console.log('[zCobol] diagnosticCollection.set executado com sucesso');
 
 	// Salva no cache
 	validationCache.set(uri, {
@@ -2244,10 +2363,10 @@ class CobolCodeActionProvider {
 				let nestingLevel = 1;
 				for (let j = diagnostic.range.start.line + 1; j < document.lineCount; j++) {
 					const nextLine = document.lineAt(j);
-					const content = nextLine.text.substring(6);
+					const content = getCobolCodeArea(nextLine.text);
 
 					// Ignora comentários
-					if (nextLine.text.length > 6 && nextLine.text[6] === '*') {
+					if (isCobolComment(nextLine.text)) {
 						continue;
 					}
 
@@ -2304,10 +2423,10 @@ class CobolCodeActionProvider {
 				let nestingLevel = 1;
 				for (let j = diagnostic.range.start.line + 1; j < document.lineCount; j++) {
 					const nextLine = document.lineAt(j);
-					const content = nextLine.text.substring(6);
+					const content = getCobolCodeArea(nextLine.text);
 
 					// Ignora comentários
-					if (nextLine.text.length > 6 && nextLine.text[6] === '*') {
+					if (isCobolComment(nextLine.text)) {
 						continue;
 					}
 
@@ -2603,8 +2722,9 @@ function activate(context) {
 			}
 
 			// Verifica se já existe uma constante com o mesmo valor
-			if (inWorkingStorage && /^\s{6,}\s*01\s+/i.test(line)) {
-				const valueMatch = line.match(/^\s{6,}\s*01\s+([A-Z0-9][\w-]*)\s+.*VALUE\s+(.+?)\.?\s*$/i);
+			const codeArea = getCobolCodeArea(line);
+			if (inWorkingStorage && /^\s*01\s+/i.test(codeArea)) {
+				const valueMatch = codeArea.match(/^\s*01\s+([A-Z0-9][\w-]*)\s+.*VALUE\s+(.+?)\.?\s*$/i);
 				if (valueMatch) {
 					const constName = valueMatch[1];
 					const constValue = valueMatch[2].trim();

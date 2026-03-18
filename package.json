@@ -7,7 +7,7 @@
     "type": "git",
     "url": "https://github.com/davidcphoto/zcobol-validation.git"
   },
-  "version": "1.2.0",
+  "version": "1.2.1",
   "icon": "ZCobolValidation.png",
   "keywords": [
     "cobol",
@@ -19,10 +19,9 @@
     "best practices",
     "legacy code",
     "zowe",
-    "cics",
-    "db2",
-    "sql cursor",
-    "file operations"
+    "zos",
+    "big iron",
+    "David Canto"
   ],
   "engines": {
     "vscode": "^1.75.0"
@@ -150,7 +149,9 @@
   "scripts": {
     "lint": "eslint .",
     "pretest": "npm run lint",
-    "test": "node ./test/runTest.js"
+    "test": "node ./test/runTest.js",
+    "vsce:publish": "SET NODE_OPTIONS=--no-deprecation && vsce publish",
+    "vsce:package": "SET NODE_OPTIONS=--no-deprecation && vsce package"
   },
   "devDependencies": {
     "@types/vscode": "^1.75.0",
