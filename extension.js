@@ -237,9 +237,10 @@ function isCobolFile(document) {
  * @param {string[]} lines
  * @param {number} varLine
  * @param {number} varLevel
+ * @param {boolean} useTraditionalFormat
  * @returns {boolean}
  */
-function isGroupVariable(lines, varLine, varLevel) {
+function isGroupVariable(lines, varLine, varLevel, useTraditionalFormat = true) {
 	const currentLine = lines[varLine];
 
 	// Se a linha tem PIC, VALUE, ou USAGE, não é um grupo
@@ -250,7 +251,7 @@ function isGroupVariable(lines, varLine, varLevel) {
 	// Se a próxima linha é um COPY, considera como grupo (variável estrutural)
 	if (varLine + 1 < lines.length) {
 		const nextLine = lines[varLine + 1];
-		const nextCodeArea = getCobolCodeArea(nextLine);
+		const nextCodeArea = getCobolCodeArea(nextLine, useTraditionalFormat);
 		if (/^\s*COPY\s+/i.test(nextCodeArea)) {
 			return true;
 		}
@@ -260,13 +261,18 @@ function isGroupVariable(lines, varLine, varLevel) {
 	for (let i = varLine + 1; i < lines.length; i++) {
 		const line = lines[i];
 
+		// Ignora comentários
+		if (isCobolComment(line, useTraditionalFormat)) {
+			continue;
+		}
+
 		// Se encontrar outra divisão, para
 		if (/^\s*PROCEDURE\s+DIVISION/i.test(line)) {
 			break;
 		}
 
 		// Procura declaração de variável
-		const codeArea = getCobolCodeArea(line);
+		const codeArea = getCobolCodeArea(line, useTraditionalFormat);
 		const nextVarMatch = codeArea.match(/^\s*(01|0[2-9]|[1-4][0-9]|77|88)\s+/i);
 		if (nextVarMatch) {
 			const nextLevel = parseInt(nextVarMatch[1]);
@@ -293,15 +299,20 @@ function isGroupVariable(lines, varLine, varLevel) {
  * @param {number} varLevel
  * @returns {string[]}
  */
-function extractLevel88Conditions(lines, varLine, varLevel) {
+function extractLevel88Conditions(lines, varLine, varLevel, useTraditionalFormat = true) {
 	const conditions = [];
 
 	// Procura níveis 88 nas linhas seguintes à declaração da variável
 	for (let i = varLine + 1; i < lines.length; i++) {
 		const line = lines[i];
 
+		// Ignora comentários
+		if (isCobolComment(line, useTraditionalFormat)) {
+			continue;
+		}
+
 		// Verifica se é uma declaração de nível
-		const codeArea = getCobolCodeArea(line);
+		const codeArea = getCobolCodeArea(line, useTraditionalFormat);
 		const levelMatch = codeArea.match(/^\s*(01|0[2-9]|[1-4][0-9]|77|88)\s+([A-Z0-9][\w-]*)/i);
 		if (levelMatch) {
 			const level = parseInt(levelMatch[1]);
@@ -375,6 +386,11 @@ function extractLevel88Declarations(text, useTraditionalFormat = true) {
 
 		// Se estamos na DATA DIVISION, procura declarações de nível 88
 		if (inDataDivision && !inProcedureDivision) {
+			// Ignora comentários
+			if (isCobolComment(line, useTraditionalFormat)) {
+				continue;
+			}
+
 			// Verifica se é uma declaração de variável (não nível 88)
 			const codeArea = getCobolCodeArea(line);
 			const varMatch = codeArea.match(/^\s*(01|0[2-9]|[1-4][0-9]|77)\s+([A-Z0-9][\w-]*)/i);
@@ -420,20 +436,31 @@ function extractLevel88Declarations(text, useTraditionalFormat = true) {
 function isLevel88Used(text, conditionName, useTraditionalFormat = true) {
 	const lines = text.split('\n');
 	let inProcedureDivision = false;
+	let inDataDivision = false;
 	let procedureDivisionStartLine = -1;
+	let inExecBlock = false;
+	let execBlockContent = '';
 
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i];
 
+		// Detecta início da DATA DIVISION
+		if (isDataDivision(line, useTraditionalFormat)) {
+			inDataDivision = true;
+			inProcedureDivision = false;
+			continue;
+		}
+
 		// Detecta início da PROCEDURE DIVISION
 		if (isProcedureDivision(line, useTraditionalFormat)) {
 			inProcedureDivision = true;
+			inDataDivision = false;
 			procedureDivisionStartLine = i;
 			continue;
 		}
 
-		// Procura uso do nível 88 na PROCEDURE DIVISION
-		if (inProcedureDivision && i > procedureDivisionStartLine) {
+		// Procura uso do nível 88 na DATA DIVISION (blocos EXEC em WORKING-STORAGE) ou PROCEDURE DIVISION
+		if (inDataDivision || (inProcedureDivision && i > procedureDivisionStartLine)) {
 			// Ignora comentários
 			if (isCobolComment(line, useTraditionalFormat)) {
 				continue;
@@ -443,6 +470,38 @@ function isLevel88Used(text, conditionName, useTraditionalFormat = true) {
 			const codeArea = getCobolCodeArea(line, useTraditionalFormat);
 			const isDeclaration = codeArea.match(/^\s*88\s+/i);
 			if (isDeclaration) {
+				continue;
+			}
+
+			// Detecta início de blocos EXEC SQL ou EXEC CICS
+			if (/EXEC\s+(SQL|CICS)/i.test(codeArea)) {
+				inExecBlock = true;
+				execBlockContent = codeArea;
+			} else if (inExecBlock) {
+				// Adiciona linha ao conteúdo do bloco
+				execBlockContent += ' ' + codeArea.trim();
+			}
+
+			// Detecta fim de bloco EXEC
+			if (inExecBlock && /END-EXEC/i.test(codeArea)) {
+				// Verifica se o nível 88 está no bloco EXEC
+				// Em SQL pode usar :VARIAVEL (host variable), então verificamos ambos os formatos
+				const regex = new RegExp('(:?' + conditionName.replace(/-/g, '\\-') + ')\\b', 'i');
+				if (regex.test(execBlockContent)) {
+					debugLog(`Nível 88 ${conditionName} encontrado em bloco EXEC na linha ${i}: ${execBlockContent.substring(0, 100)}...`);
+					return true;
+				}
+
+				// Reset do bloco
+				inExecBlock = false;
+				execBlockContent = '';
+				// Não continuar verificando esta linha - já processamos o bloco
+				continue;
+			}
+
+			// Se estiver dentro de bloco EXEC, não faz verificação regular
+			// Aguarda até o END-EXEC para processar o bloco completo
+			if (inExecBlock) {
 				continue;
 			}
 
@@ -506,6 +565,11 @@ function extractDeclaredVariables(text, useTraditionalFormat = true) {
 
 		// Se estamos na DATA DIVISION, procura declarações de variáveis
 		if (inDataDivision && !inProcedureDivision) {
+			// Ignora comentários
+			if (isCobolComment(line, useTraditionalFormat)) {
+				continue;
+			}
+
 			// Procura por declarações de variáveis (nível 01-49, 77, 88)
 			const codeArea = getCobolCodeArea(line);
 			const varMatch = codeArea.match(/^\s*(01|0[2-9]|[1-4][0-9]|77)\s+([A-Z0-9][\w-]*)/i);
@@ -516,10 +580,10 @@ function extractDeclaredVariables(text, useTraditionalFormat = true) {
 				// Ignora FILLER e palavras reservadas comuns
 				if (varName !== 'FILLER' && !varName.startsWith('FILLER-')) {
 					// Ignora variáveis de grupo (que não têm PIC e têm sub-variáveis)
-					if (!isGroupVariable(lines, i, varLevel)) {
+					if (!isGroupVariable(lines, i, varLevel, useTraditionalFormat)) {
 						const column = line.indexOf(varMatch[2]);
 						// Extrai as condições de nível 88 associadas a esta variável
-						const level88Conditions = extractLevel88Conditions(lines, i, varLevel);
+						const level88Conditions = extractLevel88Conditions(lines, i, varLevel, useTraditionalFormat);
 
 						variables.set(varName, {
 							line: i,
@@ -554,6 +618,8 @@ function isVariableUsed(text, varName, isLinkage = false, level88Conditions = []
 	let inDataDivision = false;
 	let procedureDivisionStartLine = -1;
 	let linkageSectionStartLine = -1;
+	let inExecBlock = false;
+	let execBlockContent = '';
 
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i];
@@ -589,8 +655,8 @@ function isVariableUsed(text, varName, isLinkage = false, level88Conditions = []
 			continue;
 		}
 
-		// Procura uso da variável na PROCEDURE DIVISION
-		if (inProcedureDivision && i > procedureDivisionStartLine) {
+		// Procura uso da variável na DATA DIVISION (blocos EXEC em WORKING-STORAGE) ou PROCEDURE DIVISION
+		if (inDataDivision || (inProcedureDivision && i > procedureDivisionStartLine)) {
 			// Ignora comentários
 			if (isCobolComment(line, useTraditionalFormat)) {
 				continue;
@@ -598,6 +664,47 @@ function isVariableUsed(text, varName, isLinkage = false, level88Conditions = []
 
 			// Extrai área de código
 			const codeArea = getCobolCodeArea(line, useTraditionalFormat);
+
+			// Detecta início de blocos EXEC SQL ou EXEC CICS
+			if (/EXEC\s+(SQL|CICS)/i.test(codeArea)) {
+				inExecBlock = true;
+				execBlockContent = codeArea;
+			} else if (inExecBlock) {
+				// Adiciona linha ao conteúdo do bloco
+				execBlockContent += ' ' + codeArea.trim();
+			}
+
+			// Detecta fim de bloco EXEC
+			if (inExecBlock && /END-EXEC/i.test(codeArea)) {
+				// Verifica se a variável está no bloco EXEC
+				// Em SQL usa-se :VARIAVEL (host variable), então verificamos ambos os formatos
+				const regex = new RegExp('(:?' + varName.replace(/-/g, '\\-') + ')\\b', 'i');
+				if (regex.test(execBlockContent)) {
+					debugLog(`Variável ${varName} encontrada em bloco EXEC na linha ${i}: ${execBlockContent.substring(0, 100)}...`);
+					return true;
+				}
+
+				// Verifica se alguma das condições de nível 88 é usada no bloco EXEC
+				for (const condition of level88Conditions) {
+					const conditionRegex = new RegExp('(:?' + condition.replace(/-/g, '\\-') + ')\\b', 'i');
+					if (conditionRegex.test(execBlockContent)) {
+						debugLog(`Condição nível 88 ${condition} da variável ${varName} encontrada em bloco EXEC na linha ${i}`);
+						return true;
+					}
+				}
+
+				// Reset do bloco
+				inExecBlock = false;
+				execBlockContent = '';
+				// Não continuar verificando esta linha - já processamos o bloco
+				continue;
+			}
+
+			// Se estiver dentro de bloco EXEC, não faz verificação regular
+			// Aguarda até o END-EXEC para processar o bloco completo
+			if (inExecBlock) {
+				continue;
+			}
 
 			// Procura a variável como palavra completa (não parte de outra palavra)
 			const regex = new RegExp('\\b' + varName.replace(/-/g, '\\-') + '\\b', 'i');
@@ -652,8 +759,9 @@ function isVariableUsed(text, varName, isLinkage = false, level88Conditions = []
 }
 
 /**
- * Verifica displays não protegidos (fora de blocos IF)
+ * Verifica displays não protegidos (fora de blocos IF e EVALUATE)
  * @param {string} text
+ * @param {boolean} useTraditionalFormat
  * @returns {Array<{line: number, column: number, length: number}>}
  */
 function findUnprotectedDisplays(text, useTraditionalFormat = true) {
@@ -661,6 +769,7 @@ function findUnprotectedDisplays(text, useTraditionalFormat = true) {
 	const lines = text.split('\n');
 	let inProcedureDivision = false;
 	let ifNestingLevel = 0;
+	let evaluateNestingLevel = 0;
 
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i];
@@ -695,9 +804,23 @@ function findUnprotectedDisplays(text, useTraditionalFormat = true) {
 			debugLog(`END-IF encontrado na linha ${i}, nível: ${ifNestingLevel}`);
 		}
 
-		// Detecta DISPLAY fora de blocos IF
+		// Detecta início de EVALUATE
+		if (/^\s*EVALUATE\s+/i.test(codeArea)) {
+			evaluateNestingLevel++;
+			debugLog(`EVALUATE encontrado na linha ${i}, nível: ${evaluateNestingLevel}`);
+		}
+
+		// Detecta fim de EVALUATE
+		if (/^\s*END-EVALUATE/i.test(codeArea)) {
+			if (evaluateNestingLevel > 0) {
+				evaluateNestingLevel--;
+			}
+			debugLog(`END-EVALUATE encontrado na linha ${i}, nível: ${evaluateNestingLevel}`);
+		}
+
+		// Detecta DISPLAY fora de blocos IF e EVALUATE
 		const displayMatch = codeArea.match(/^\s*(DISPLAY\s+)/i);
-		if (displayMatch && ifNestingLevel === 0) {
+		if (displayMatch && ifNestingLevel === 0 && evaluateNestingLevel === 0) {
 			const column = line.indexOf(displayMatch[1]);
 			displays.push({
 				line: i,
@@ -1204,6 +1327,12 @@ function findLowerCaseCode(text, useTraditionalFormat = true) {
  * @param {boolean} useTraditionalFormat
  * @returns {Map<string, {line: number, column: number}>}
  */
+/*
+ * VALIDAÇÕES DE FICHEIROS - DESATIVADAS
+ *
+ * As seguintes funções relacionadas com validação de operações de ficheiros
+ * foram desativadas conforme solicitado.
+ *
 function extractFileDeclarations(text, useTraditionalFormat = true) {
 	const files = new Map();
 	const lines = text.split('\n');
@@ -1251,12 +1380,6 @@ function extractFileDeclarations(text, useTraditionalFormat = true) {
 	return files;
 }
 
-/**
- * Verifica operações de ficheiros (OPEN, CLOSE, READ, WRITE) no código
- * @param {string} text
- * @param {string} fileName - Nome do ficheiro a verificar
- * @returns {{hasOpen: boolean, hasClose: boolean, hasReadOrWrite: boolean}}
- */
 function hasFileOperations(text, fileName) {
 	const lines = text.split('\n');
 	let inProcedureDivision = false;
@@ -1328,12 +1451,6 @@ function hasFileOperations(text, fileName) {
 	return { hasOpen, hasClose, hasReadOrWrite };
 }
 
-/**
- * Verifica ficheiros sem operações completas (OPEN, CLOSE, READ/WRITE)
- * @param {string} text
- * @param {boolean} useTraditionalFormat
- * @returns {Array<{fileName: string, line: number, column: number, missing: string[]}>}
- */
 function findFilesWithoutOperations(text, useTraditionalFormat = true) {
 	const filesWithoutOps = [];
 	const declaredFiles = extractFileDeclarations(text, useTraditionalFormat);
@@ -1365,6 +1482,7 @@ function findFilesWithoutOperations(text, useTraditionalFormat = true) {
 
 	return filesWithoutOps;
 }
+*/
 
 /**
  * Extrai declarações de cursores no código COBOL (DECLARE CURSOR)
@@ -1575,8 +1693,9 @@ function findHardcodedValues(text, enableInString = false, enableInDisplay = fal
 		const line = lines[i];
 
 		// Detecta início da PROCEDURE DIVISION
-		if (/^\s*PROCEDURE\s+DIVISION/i.test(line)) {
+		if (isProcedureDivision(line, useTraditionalFormat)) {
 			inProcedureDivision = true;
+			debugLog(`PROCEDURE DIVISION encontrada na linha ${i} de findHardcodedValues`);
 			continue;
 		}
 
@@ -1692,54 +1811,57 @@ function findHardcodedValues(text, enableInString = false, enableInDisplay = fal
 			// Detecta números literais em comandos (MOVE, IF, COMPUTE, etc)
 			// Mas não em declarações PIC ou dentro de reference modifications ou strings literais
 			if (!/\bPIC\b|\bPICTURE\b/i.test(lineContent)) {
-				// Remove strings literais e reference modifications para não validar números dentro delas
-				// Exemplo: 'ABC123' -> '', WS-VAR(1:10) -> WS-VAR()
-				const lineWithoutStringsAndRefMod = lineWithoutRefMod.replace(/(['"])([^'"]*)\1/g, '');
+				debugLog(`Processando números na linha ${lineIndex}: ${lineContent.trim()}`);
 
-				// Usa lookbehind/lookahead para garantir que o número está isolado
-				// Não precedido ou seguido por letra, número ou hífen (parte de identificador)
-				const numberMatches = [...lineWithoutStringsAndRefMod.matchAll(/(?<![A-Z0-9-])(\d+(?:\.\d+)?)(?![A-Z0-9-])/gi)];
-				for (const match of numberMatches) {
+				// Remove strings literais para não validar números dentro delas
+				let tempLine = lineContent;
+
+				// Remove strings entre aspas simples e duplas
+				tempLine = tempLine.replace(/(['"])([^'"]*)\1/g, (match) => {
+					// Substitui por espaços do mesmo tamanho para manter posições
+					return ' '.repeat(match.length);
+				});
+
+				// Remove conteúdo de reference modifications mas mantém parênteses
+				tempLine = tempLine.replace(/\(([^)]*:[^)]*)\)/g, (match, content) => {
+					// Mantém os parênteses mas remove o conteúdo
+					return '(' + ' '.repeat(content.length) + ')';
+				});
+
+				// Procura números isolados (inteiros ou decimais) na linha processada
+				const numberRegex = /\b(\d+(?:\.\d+)?)\b/g;
+				let match;
+
+				while ((match = numberRegex.exec(tempLine)) !== null) {
 					const value = match[1];
-					const matchIndex = match.index;
+					const posInTemp = match.index;
 
-					// Calcula a posição real na linha original
-					// Precisa procurar o número na linha original próximo da posição calculada
-					const searchStart = line.substring(0, 6).length + matchIndex;
-					const searchContext = line.substring(Math.max(0, searchStart - 5), searchStart + value.length + 5);
-					const indexInContext = searchContext.indexOf(value);
+					// Verifica contexto antes e depois na linha temporária
+					const beforeChar = posInTemp > 0 ? tempLine[posInTemp - 1] : ' ';
+					const afterChar = posInTemp + value.length < tempLine.length ? tempLine[posInTemp + value.length] : ' ';
 
-					if (indexInContext !== -1) {
-						const column = Math.max(0, searchStart - 5) + indexInContext;
-						const actualSubstring = line.substring(column, column + value.length);
+					// Verifica se não faz parte de um identificador
+					const isPartOfIdentifier = /[A-Z0-9-]/i.test(beforeChar) || /[A-Z0-9-]/i.test(afterChar);
 
-						// Verifica se o número realmente existe na posição calculada da linha original
-						// e não está dentro de parênteses com dois pontos (reference modification)
-						if (actualSubstring === value) {
-							const beforeNum = line.substring(Math.max(0, column - 10), column);
-							const afterNum = line.substring(column + value.length, Math.min(line.length, column + value.length + 10));
+					// Verifica se está dentro de parênteses (reference modification)
+					const beforeContext = tempLine.substring(Math.max(0, posInTemp - 10), posInTemp);
+					const afterContext = tempLine.substring(posInTemp + value.length, Math.min(tempLine.length, posInTemp + value.length + 10));
+					const isInRefMod = /\([^)]*$/.test(beforeContext) && /^[^(]*[:)]/.test(afterContext);
 
-							// Verifica se não faz parte de uma reference modification
-							const isInRefMod = /\([^)]*$/.test(beforeNum) && /^[^(]*:/.test(afterNum) ||
-							                   /:[^)]*$/.test(beforeNum) && /^[^(]*\)/.test(afterNum);
+					debugLog(`isPartOfIdentifier: ${isPartOfIdentifier}, isInRefMod: ${isInRefMod}`);
 
-							// Verifica se não está dentro de uma string literal (entre aspas ou pelicas)
-							const beforeContext = line.substring(0, column);
-							const singleQuotes = (beforeContext.match(/'/g) || []).length;
-							const doubleQuotes = (beforeContext.match(/"/g) || []).length;
-							const isInString = (singleQuotes % 2 !== 0) || (doubleQuotes % 2 !== 0);
+					if (!isPartOfIdentifier && !isInRefMod) {
+						// A posição em tempLine é a mesma que em lineContent (mantivemos o tamanho)
+						const fullColumn = line.indexOf(lineContent) + posInTemp;
 
-							if (!isInRefMod && !isInString) {
-								hardcoded.push({
-									line: lineIndex,
-									column: column,
-									length: value.length,
-									value: value,
-									type: 'number'
-								});
-								debugLog(`Número hardcoded encontrado na linha ${lineIndex}: ${value}`);
-							}
-						}
+						hardcoded.push({
+							line: lineIndex,
+							column: fullColumn,
+							length: value.length,
+							value: value,
+							type: 'number'
+						});
+						debugLog(`Número hardcoded encontrado na linha ${lineIndex}: ${value}`);
 					}
 				}
 			}
@@ -1747,6 +1869,89 @@ function findHardcodedValues(text, enableInString = false, enableInDisplay = fal
 	}
 
 	return hardcoded;
+}
+
+/**
+ * Verifica declarações de variáveis na PROCEDURE DIVISION que deveriam estar na WORKING-STORAGE SECTION
+ * @param {string} text
+ * @param {boolean} useTraditionalFormat
+ * @returns {Array<{line: number, column: number, length: number, varName: string}>}
+ */
+function findVariablesInProcedureDivision(text, useTraditionalFormat = true) {
+	const variables = [];
+	const lines = text.split('\n');
+	let inProcedureDivision = false;
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+
+		// Detecta início da PROCEDURE DIVISION
+		if (isProcedureDivision(line, useTraditionalFormat)) {
+			inProcedureDivision = true;
+			continue;
+		}
+
+		if (!inProcedureDivision) {
+			continue;
+		}
+
+		// Ignora comentários
+		if (isCobolComment(line, useTraditionalFormat)) {
+			continue;
+		}
+
+		const codeArea = getCobolCodeArea(line, useTraditionalFormat);
+
+		// Detecta declarações de variáveis (níveis 01-49, 77) com VALUE na PROCEDURE DIVISION
+		// Padrão: nível + nome + PIC/PICTURE (opcional) + VALUE
+		const varMatch = codeArea.match(/^\s*(01|0[2-9]|[1-4][0-9]|77)\s+([A-Z0-9][\w-]*)/i);
+		if (varMatch) {
+			const varName = varMatch[2].toUpperCase();
+
+			// Verifica se tem PIC ou VALUE na mesma linha ou nas próximas
+			let hasValueOrPic = /\b(PIC|PICTURE|VALUE)\b/i.test(codeArea);
+
+			// Se não tem na linha atual, verifica próximas linhas (continuação)
+			if (!hasValueOrPic && i < lines.length - 1) {
+				for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+					const nextLine = lines[j];
+					if (isCobolComment(nextLine, useTraditionalFormat)) {
+						continue;
+					}
+					const nextCodeArea = getCobolCodeArea(nextLine, useTraditionalFormat);
+
+					// Se encontrar outra declaração de nível, para
+					if (/^\s*(01|0[2-9]|[1-4][0-9]|77|88)\s+/i.test(nextCodeArea)) {
+						break;
+					}
+
+					if (/\b(PIC|PICTURE|VALUE)\b/i.test(nextCodeArea)) {
+						hasValueOrPic = true;
+						break;
+					}
+
+					// Se encontrar ponto final, para
+					if (/\.\s*$/.test(nextCodeArea.trim())) {
+						break;
+					}
+				}
+			}
+
+			// Se tem PIC ou VALUE, é uma declaração de constante/variável
+			if (hasValueOrPic) {
+				const column = line.indexOf(varMatch[0]);
+				variables.push({
+					line: i,
+					column: column,
+					length: varMatch[0].length,
+					varName: varName
+				});
+				debugLog(`Variável ${varName} declarada na PROCEDURE DIVISION na linha ${i}`);
+			}
+		}
+	}
+
+	return variables;
 }
 
 /**
@@ -2065,6 +2270,32 @@ function validateCobolDocument(document) {
 		}
 	}
 
+	// Validação de variáveis declaradas na PROCEDURE DIVISION
+	const enableVarsInProcedureCheck = config.get('enableVarsInProcedureCheck', true);
+	if (enableVarsInProcedureCheck) {
+		const varsInProcedure = findVariablesInProcedureDivision(text, useTraditionalFormat);
+		debugLog('Variáveis declaradas na PROCEDURE DIVISION:', varsInProcedure.length);
+
+		for (const varDecl of varsInProcedure) {
+			const range = new vscode.Range(
+				varDecl.line,
+				varDecl.column,
+				varDecl.line,
+				varDecl.column + varDecl.length
+			);
+
+			const diagnostic = new vscode.Diagnostic(
+				range,
+				`Variable '${varDecl.varName}' declared in PROCEDURE DIVISION - constants should be declared in WORKING-STORAGE SECTION`,
+				vscode.DiagnosticSeverity.Warning
+			);
+			diagnostic.code = 'variable-in-procedure';
+			diagnostic.source = 'zCobol Validation';
+
+			diagnostics.push(diagnostic);
+		}
+	}
+
 	// Validação de código em minúsculas
 	const enableLowerCaseCheck = config.get('enableLowerCaseCheck', false);
 	if (enableLowerCaseCheck) {
@@ -2091,33 +2322,6 @@ function validateCobolDocument(document) {
 				location: new vscode.Location(document.uri, range),
 				message: lowerCase.word
 			}];
-
-			diagnostics.push(diagnostic);
-		}
-	}
-
-	// Validação de operações de ficheiro (OPEN, CLOSE, READ/WRITE)
-	const enableFileOperationsCheck = config.get('enableFileOperationsCheck', true);
-	if (enableFileOperationsCheck) {
-		const filesWithoutOps = findFilesWithoutOperations(text, useTraditionalFormat);
-		debugLog('Files without complete operations:', filesWithoutOps.length);
-
-		for (const file of filesWithoutOps) {
-			const range = new vscode.Range(
-				file.line,
-				file.column,
-				file.line,
-				file.column + file.fileName.length
-			);
-
-			const missingOps = file.missing.join(', ');
-			const diagnostic = new vscode.Diagnostic(
-				range,
-				`File '${file.fileName}' declared but missing: ${missingOps}`,
-				vscode.DiagnosticSeverity.Warning
-			);
-			diagnostic.code = 'missing-file-operations';
-			diagnostic.source = 'zCobol Validation';
 
 			diagnostics.push(diagnostic);
 		}
@@ -2593,27 +2797,6 @@ class CobolCodeActionProvider {
 				codeActions.push(convertToUpperCase);
 			}
 
-			// Code actions para operações de ficheiro em falta
-			if (diagnostic.source === 'zCobol Validation' && diagnostic.code === 'missing-file-operations') {
-				const line = document.lineAt(diagnostic.range.start.line);
-				const lineText = line.text;
-
-				// Action 1: Comment line
-				const commentLine = new vscode.CodeAction('Comment line (asterisk)', vscode.CodeActionKind.QuickFix);
-				commentLine.diagnostics = [diagnostic];
-				commentLine.edit = new vscode.WorkspaceEdit();
-
-				let newLineText;
-				if (lineText.length >= 7) {
-					newLineText = lineText.substring(0, 6) + '*' + lineText.substring(7);
-				} else {
-					newLineText = lineText.padEnd(6, ' ') + '*';
-				}
-
-				commentLine.edit.replace(document.uri, line.range, newLineText);
-				codeActions.push(commentLine);
-			}
-
 			// Code actions para operações de cursor em falta
 			if (diagnostic.source === 'zCobol Validation' && diagnostic.code === 'missing-cursor-operations') {
 				const line = document.lineAt(diagnostic.range.start.line);
@@ -2778,17 +2961,30 @@ function activate(context) {
 			if (isWorkingStorageSection(line, useTraditionalFormat)) {
 				workingStorageLine = i;
 				inWorkingStorage = true;
+				debugLog(`WORKING-STORAGE SECTION encontrada na linha ${i}`);
 				continue;
 			}
 
-			// Se encontrar outra seção, sai da WORKING-STORAGE
+			// Se encontrar outra seção ou PROCEDURE DIVISION, sai da WORKING-STORAGE
 			if (inWorkingStorage && /^\s*(LINKAGE|LOCAL-STORAGE|FILE|SCREEN)\s+SECTION/i.test(codeArea)) {
 				inWorkingStorage = false;
+				debugLog(`Saiu da WORKING-STORAGE na linha ${i} (outra secção encontrada)`);
+			}
+
+			// Para quando encontrar PROCEDURE DIVISION
+			if (isProcedureDivision(line, useTraditionalFormat)) {
+				if (inWorkingStorage) {
+					inWorkingStorage = false;
+					debugLog(`Saiu da WORKING-STORAGE na linha ${i} (PROCEDURE DIVISION encontrada)`);
+				}
+				debugLog(`PROCEDURE DIVISION encontrada na linha ${i}, a parar procura`);
+				break;
 			}
 
 			// Dentro da WORKING-STORAGE, procura linhas que terminam com ponto (fim de definição completa)
 			if (inWorkingStorage && /\.\s*$/.test(line)) {
 				lastCompleteVarLine = i;
+				debugLog(`Última linha completa na WORKING-STORAGE: ${i}`);
 			}
 
 			// Verifica se já existe uma constante com o mesmo valor
@@ -2805,10 +3001,6 @@ function activate(context) {
 						break;
 					}
 				}
-			}
-
-			if (/^\s*PROCEDURE\s+DIVISION/i.test(line)) {
-				break;
 			}
 		}
 
@@ -2871,6 +3063,8 @@ function activate(context) {
 		return;
 	}
 
+	debugLog(`workingStorageLine: ${workingStorageLine}, lastCompleteVarLine: ${lastCompleteVarLine}`);
+
 	// Determina o tipo PIC baseado no tipo do valor
 	let picClause = '';
 	let valueClause = hardcodedValue;
@@ -2886,11 +3080,60 @@ function activate(context) {
 	// Insert the constant declaration in WORKING-STORAGE SECTION
 	await editor.edit(editBuilder => {
 		const insertLine = lastCompleteVarLine >= 0 ? lastCompleteVarLine + 1 : workingStorageLine + 1;
+		debugLog(`Inserindo constante na linha ${insertLine}`);
 		const constantDecl = `       01  ${constantName.padEnd(28)} ${picClause} VALUE ${valueClause}.\n`;
 		editBuilder.insert(new vscode.Position(insertLine, 0), constantDecl);
 
+		// Get the full line containing the hardcoded value
+		const line = document.lineAt(range.start.line);
+		const lineText = line.text;
+
 		// Replace the hardcoded value with the constant name
-		editBuilder.replace(range, constantName);
+		const beforeValue = lineText.substring(0, range.start.character);
+		const afterValue = lineText.substring(range.end.character);
+
+		// Check if this is a MOVE ... TO statement
+		// beforeValue should end with MOVE followed by whitespace: "MOVE "
+		// afterValue should start with whitespace followed by TO: " TO "
+		const moveMatch = /\bMOVE\s+$/i.test(beforeValue);
+		const toMatch = /^\s+TO\s+/i.test(afterValue);
+
+		if (moveMatch && toMatch && useTraditionalFormat) {
+			// This is a MOVE TO statement in traditional format
+			// Calculate the new line after replacement
+			const newLineBeforeTo = beforeValue + constantName;
+
+			// Find where TO keyword starts in the afterValue
+			const toKeywordMatch = afterValue.match(/^\s+(TO\s+.*)$/i);
+			if (toKeywordMatch) {
+				const toAndRest = toKeywordMatch[1];
+
+				// Check if we can keep TO on the same line (within column 72)
+				const fullLineLength = newLineBeforeTo.length + 1 + toAndRest.length; // +1 for space before TO
+
+				if (fullLineLength <= 72) {
+					// Can keep on same line
+					editBuilder.replace(range, constantName);
+				} else {
+					// Need to move TO to next line
+					// Replace the value and everything after it
+					const rangeToEndOfLine = new vscode.Range(range.start, line.range.end);
+
+					// Determine indentation for continuation line
+					// In COBOL traditional format, continuation starts at column 12 (index 11)
+					const continuationIndent = '           '; // 11 spaces (columns 8-11 for continuation)
+					const newText = constantName + '\n       ' + continuationIndent + toAndRest;
+
+					editBuilder.replace(rangeToEndOfLine, newText);
+				}
+			} else {
+				// Fallback: just replace the value
+				editBuilder.replace(range, constantName);
+			}
+		} else {
+			// Not a MOVE TO or not traditional format, just replace
+			editBuilder.replace(range, constantName);
+		}
 	});
 })
 	);
@@ -2937,7 +3180,6 @@ function activate(context) {
 			    event.affectsConfiguration('zcobol-validation.enableHardcodedCheck') ||
 			    event.affectsConfiguration('zcobol-validation.enableLowerCaseCheck') ||
 			    event.affectsConfiguration('zcobol-validation.enableSymbolicOperatorCheck') ||
-			    event.affectsConfiguration('zcobol-validation.enableFileOperationsCheck') ||
 			    event.affectsConfiguration('zcobol-validation.enableCursorOperationsCheck') ||
 			    event.affectsConfiguration('zcobol-validation.operatorFormat')) {
 				debugLog('Configuration changed - revalidating all documents');
