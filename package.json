@@ -7,7 +7,7 @@
     "type": "git",
     "url": "https://github.com/davidcphoto/zcobol-validation.git"
   },
-  "version": "1.2.2",
+  "version": "1.2.3",
   "icon": "ZCobolValidation.png",
   "keywords": [
     "cobol",
@@ -93,6 +93,11 @@
           "default": true,
           "description": "Enable hardcoded value validation (strings and number literals)"
         },
+        "zcobol-validation.enableVarsInProcedureCheck": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable validation for variables/constants declared in PROCEDURE DIVISION - they should be in WORKING-STORAGE SECTION"
+        },
         "zcobol-validation.enableLowerCaseCheck": {
           "type": "boolean",
           "default": false,
@@ -132,11 +137,6 @@
           "type": "string",
           "default": "con-",
           "description": "Prefix used to generate constant names (e.g., 'con-' generates con-value)"
-        },
-        "zcobol-validation.enableFileOperationsCheck": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable file operations validation (OPEN, CLOSE, READ/WRITE)"
         },
         "zcobol-validation.enableCursorOperationsCheck": {
           "type": "boolean",
