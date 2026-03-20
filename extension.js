@@ -2967,6 +2967,70 @@ function activate(context) {
 		})
 	);
 
+	/**
+	 * Procura a estrutura de grupo para constantes na WORKING-STORAGE
+	 * @param {vscode.TextDocument} document
+	 * @param {string} groupName - Nome da estrutura (ex: "CON-CONSTANTS")
+	 * @param {boolean} useTraditionalFormat
+	 * @returns {{found: boolean, groupLine: number, lastItemLine: number}} - Informação sobre a estrutura
+	 */
+	function findConstantGroupStructure(document, groupName, useTraditionalFormat) {
+		let inWorkingStorage = false;
+		let groupLine = -1;
+		let lastItemLine = -1;
+		let groupLevel = -1;
+
+		for (let i = 0; i < document.lineCount; i++) {
+			const line = document.lineAt(i).text;
+			const codeArea = getCobolCodeArea(line, useTraditionalFormat);
+
+			// Detecta WORKING-STORAGE SECTION
+			if (isWorkingStorageSection(line, useTraditionalFormat)) {
+				inWorkingStorage = true;
+				continue;
+			}
+
+			// Sai da WORKING-STORAGE ao encontrar outra seção
+			if (inWorkingStorage && /^\s*(LINKAGE|LOCAL-STORAGE|FILE|SCREEN|PROCEDURE)\s+(SECTION|DIVISION)/i.test(codeArea)) {
+				break;
+			}
+
+			// Procura a declaração do grupo
+			if (inWorkingStorage && groupLine < 0) {
+				const groupMatch = codeArea.match(/^\s*(01)\s+([A-Z0-9][\w-]*)\s*\.?\s*$/i);
+				if (groupMatch && groupMatch[2].toUpperCase() === groupName.toUpperCase()) {
+					groupLine = i;
+					groupLevel = parseInt(groupMatch[1]);
+					debugLog(`[findConstantGroupStructure] Estrutura de grupo '${groupName}' encontrada na linha ${i}`);
+					continue;
+				}
+			}
+
+			// Se encontrou o grupo, procura o último item dentro dele
+			if (groupLine >= 0) {
+				const itemMatch = codeArea.match(/^\s*(0[2-9]|[1-4][0-9]|77)\s+([A-Z0-9][\w-]*)/i);
+				if (itemMatch) {
+					const itemLevel = parseInt(itemMatch[1]);
+					// Se o nível é maior que o grupo, é um item dentro do grupo
+					if (itemLevel > groupLevel) {
+						lastItemLine = i;
+						debugLog(`[findConstantGroupStructure] Item encontrado no nível ${itemLevel} na linha ${i}`);
+					} else {
+						// Se encontrou um nível igual ou menor, saiu do grupo
+						debugLog(`[findConstantGroupStructure] Fim do grupo detectado na linha ${i}`);
+						break;
+					}
+				}
+			}
+		}
+
+		return {
+			found: groupLine >= 0,
+			groupLine: groupLine,
+			lastItemLine: lastItemLine >= 0 ? lastItemLine : groupLine
+		};
+	}
+
 	// Register the command to create constant
 	context.subscriptions.push(
 		vscode.commands.registerCommand('zcobol-validation.createConstant', async (document, range, hardcodedValue, valueType) => {
@@ -3055,6 +3119,9 @@ function activate(context) {
 		// Gera um nome padrão baseado no valor e no prefixo configurado
 		const config = vscode.workspace.getConfiguration('zcobol-validation');
 		const prefix = config.get('constantPrefix', 'CON-');
+		const constantGroupName = config.get('constantGroupName', '');
+
+		debugLog(`[createConstant] constantGroupName: '${constantGroupName}'`);
 
 		// Extrai o valor sem aspas para gerar o nome
 		let valueForName = hardcodedValue.trim();
@@ -3110,9 +3177,40 @@ function activate(context) {
 
 	// Insert the constant declaration in WORKING-STORAGE SECTION
 	await editor.edit(editBuilder => {
-		const insertLine = lastCompleteVarLine >= 0 ? lastCompleteVarLine + 1 : workingStorageLine + 1;
-		debugLog(`Inserindo constante na linha ${insertLine}`);
-		const constantDecl = `       01  ${constantName.padEnd(28)} ${picClause} VALUE ${valueClause}.\n`;
+		let insertLine;
+		let constantDecl;
+		let constantLevel;
+
+		// Verifica se deve usar estrutura de grupo para constantes
+		if (constantGroupName && constantGroupName.trim().length > 0) {
+			debugLog(`[createConstant] Procurando estrutura de grupo '${constantGroupName}'`);
+			const groupInfo = findConstantGroupStructure(document, constantGroupName.trim(), useTraditionalFormat);
+
+			if (groupInfo.found) {
+				// Estrutura existe, inserir constante dentro dela como nível 05
+				debugLog(`[createConstant] Estrutura encontrada, inserindo após linha ${groupInfo.lastItemLine}`);
+				insertLine = groupInfo.lastItemLine + 1;
+				constantLevel = '05';
+				constantDecl = `           ${constantLevel}  ${constantName.padEnd(28)} ${picClause} VALUE ${valueClause}.\n`;
+			} else {
+				// Estrutura não existe, criar primeiro
+				debugLog(`[createConstant] Estrutura não existe, criando na linha ${lastCompleteVarLine >= 0 ? lastCompleteVarLine + 1 : workingStorageLine + 1}`);
+				insertLine = lastCompleteVarLine >= 0 ? lastCompleteVarLine + 1 : workingStorageLine + 1;
+
+				// Cria a estrutura de grupo e a primeira constante dentro dela
+				const groupDecl = `       01  ${constantGroupName.trim()}.\n`;
+				constantLevel = '05';
+				constantDecl = groupDecl + `           ${constantLevel}  ${constantName.padEnd(28)} ${picClause} VALUE ${valueClause}.\n`;
+			}
+		} else {
+			// Comportamento padrão: constante independente no nível 01
+			debugLog(`[createConstant] Sem estrutura de grupo, inserindo constante independente`);
+			insertLine = lastCompleteVarLine >= 0 ? lastCompleteVarLine + 1 : workingStorageLine + 1;
+			constantLevel = '01';
+			constantDecl = `       ${constantLevel}  ${constantName.padEnd(28)} ${picClause} VALUE ${valueClause}.\n`;
+		}
+
+		debugLog(`[createConstant] Inserindo constante na linha ${insertLine} com nível ${constantLevel}`);
 		editBuilder.insert(new vscode.Position(insertLine, 0), constantDecl);
 
 		// Get the full line containing the hardcoded value

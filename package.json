@@ -7,7 +7,7 @@
     "type": "git",
     "url": "https://github.com/davidcphoto/zcobol-validation.git"
   },
-  "version": "1.2.3",
+  "version": "1.2.4",
   "icon": "ZCobolValidation.png",
   "keywords": [
     "cobol",
@@ -137,6 +137,11 @@
           "type": "string",
           "default": "con-",
           "description": "Prefix used to generate constant names (e.g., 'con-' generates con-value)"
+        },
+        "zcobol-validation.constantGroupName": {
+          "type": "string",
+          "default": "",
+          "description": "Name of the group data structure for constants (e.g., 'CON-CONSTANTS'). If specified, new constants will be created as level 05 items under this group. If empty, constants are created as independent level 01 items."
         },
         "zcobol-validation.enableCursorOperationsCheck": {
           "type": "boolean",
