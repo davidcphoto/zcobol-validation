@@ -28,8 +28,8 @@
 
            IF WS-CONTADOR > 0
               DISPLAY 'Dentro de IF - protegido'
-              MOVE 'TESTE' TO WS-CAMPO1
-              MOVE 10 TO WS-CAMPO2
+              MOVE 'TESTE'       TO WS-CAMPO1
+              MOVE 10            TO WS-CAMPO2
            END-IF.
 
       *    Criacao de constantes:

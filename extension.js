@@ -3083,51 +3083,53 @@ function activate(context) {
 			}
 
 			// Verifica se já existe uma constante com o mesmo valor
-			if (inWorkingStorage && /^\s*01\s+/i.test(codeArea)) {
-				const valueMatch = codeArea.match(/^\s*01\s+([A-Z0-9][\w-]*)\s+.*VALUE\s+(.+?)\.?\s*$/i);
-				if (valueMatch) {
-					const constName = valueMatch[1];
-					const constValue = valueMatch[2].trim();
+		// Procura em todos os níveis: 01-49 e 77
+		if (inWorkingStorage && /^\s*(01|0[2-9]|[1-4][0-9]|77)\s+/i.test(codeArea)) {
+			const valueMatch = codeArea.match(/^\s*(01|0[2-9]|[1-4][0-9]|77)\s+([A-Z0-9][\w-]*)\s+.*VALUE\s+(.+?)\.?\s*$/i);
+			if (valueMatch) {
+				const constLevel = valueMatch[1];
+				const constName = valueMatch[2];
+				const constValue = valueMatch[3].trim();
 
-					// Compara o valor (remove espaços extras)
-					if (constValue === hardcodedValue.trim()) {
-						existingConstant = constName;
-						debugLog(`Existing constant found: ${constName} with value ${constValue}`);
-						break;
+				// Normaliza os valores para comparação (remove aspas externas se existirem)
+				let normalizedConstValue = constValue.replace(/^['"]|['"]$/g, '');
+				let normalizedHardcodedValue = hardcodedValue.trim().replace(/^['"]|['"]$/g, '');
+
+				debugLog(`[createConstant] Comparando constante nível ${constLevel} '${constName}': '${normalizedConstValue}' com hardcoded: '${normalizedHardcodedValue}'`);
+
+				// Compara os valores normalizados
+				if (normalizedConstValue === normalizedHardcodedValue) {
+					existingConstant = constName;
+					debugLog(`Existing constant found: ${constName} (level ${constLevel}) with value ${constValue}`);
 					}
 				}
 			}
 		}
 
-		// If found an existing constant, use it
-		if (existingConstant) {
-			const useExisting = await vscode.window.showInformationMessage(
-				`Constant '${existingConstant}' already exists with this value. Do you want to use it?`,
-				'Yes', 'No, create new'
-			);
+// If found an existing constant, use it automatically
+	if (existingConstant) {
+		// Replace the hardcoded value with the existing constant
+		await editor.edit(editBuilder => {
+			editBuilder.replace(range, existingConstant);
+		});
+		vscode.window.showInformationMessage(
+			`Using existing constant '${existingConstant}' with the same value.`
+		);
+		return;
+	}
 
-			if (useExisting === 'Yes') {
-				// Replace the hardcoded value with the existing constant
-				await editor.edit(editBuilder => {
-					editBuilder.replace(range, existingConstant);
-				});
-				return;
-			}
-			// If chose "No, create new", continue to create a new constant
-		}
+	// Gera um nome padrão baseado no valor e no prefixo configurado
+	const config = vscode.workspace.getConfiguration('zcobol-validation');
+	const prefix = config.get('constantPrefix', 'CON-');
+	const constantGroupName = String(config.get('constantGroupName', '') || '');
 
-		// Gera um nome padrão baseado no valor e no prefixo configurado
-		const config = vscode.workspace.getConfiguration('zcobol-validation');
-		const prefix = config.get('constantPrefix', 'CON-');
-		const constantGroupName = config.get('constantGroupName', '');
+	debugLog(`[createConstant] constantGroupName: '${constantGroupName}'`);
 
-		debugLog(`[createConstant] constantGroupName: '${constantGroupName}'`);
+	// Extrai o valor sem aspas para gerar o nome
+	let valueForName = hardcodedValue.trim();
 
-		// Extrai o valor sem aspas para gerar o nome
-		let valueForName = hardcodedValue.trim();
-
-		// Se for string (alfanumérico), remove as aspas/pelicas do valor para usar no nome
-		if (valueType === 'string') {
+	// Se for string (alfanumérico), remove as aspas/pelicas do valor para usar no nome
+	if (valueType === 'string') {
 			// Remove aspas simples ou duplas do início e fim
 			valueForName = valueForName.replace(/^['"]|['"]$/g, '');
 		}
