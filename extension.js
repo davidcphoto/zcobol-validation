@@ -242,9 +242,10 @@ function isCobolFile(document) {
  */
 function isGroupVariable(lines, varLine, varLevel, useTraditionalFormat = true) {
 	const currentLine = lines[varLine];
+	const currentCodeArea = getCobolCodeArea(currentLine, useTraditionalFormat);
 
 	// Se a linha tem PIC, VALUE, ou USAGE, não é um grupo
-	if (/\bPIC\b|\bPICTURE\b|\bVALUE\b|\bUSAGE\b/i.test(currentLine)) {
+	if (/\bPIC\b|\bPICTURE\b|\bVALUE\b|\bUSAGE\b/i.test(currentCodeArea)) {
 		return false;
 	}
 
@@ -392,7 +393,7 @@ function extractLevel88Declarations(text, useTraditionalFormat = true) {
 			}
 
 			// Verifica se é uma declaração de variável (não nível 88)
-			const codeArea = getCobolCodeArea(line);
+			const codeArea = getCobolCodeArea(line, useTraditionalFormat);
 			const varMatch = codeArea.match(/^\s*(01|0[2-9]|[1-4][0-9]|77)\s+([A-Z0-9][\w-]*)/i);
 			if (varMatch) {
 				lastParentLevel = parseInt(varMatch[1]);
@@ -527,6 +528,9 @@ function extractDeclaredVariables(text, useTraditionalFormat = true) {
 	const variables = new Map();
 	const lines = text.split('\n');
 
+	debugLog('[zCobol extractDeclaredVariables] useTraditionalFormat:', useTraditionalFormat);
+	debugLog('[zCobol extractDeclaredVariables] Total de linhas:', lines.length);
+
 	let inDataDivision = false;
 	let inLinkageSection = false;
 	let inProcedureDivision = false;
@@ -539,12 +543,14 @@ function extractDeclaredVariables(text, useTraditionalFormat = true) {
 		if (isDataDivision(line, useTraditionalFormat)) {
 			inDataDivision = true;
 			inProcedureDivision = false;
+			debugLog('[zCobol extractDeclaredVariables] DATA DIVISION encontrada na linha', i);
 			continue;
 		}
 
 		// Detecta início da LINKAGE SECTION
 		if (isLinkageSection(line, useTraditionalFormat)) {
 			inLinkageSection = true;
+			debugLog('[zCobol extractDeclaredVariables] LINKAGE SECTION encontrada na linha', i);
 			continue;
 		}
 
@@ -552,14 +558,16 @@ function extractDeclaredVariables(text, useTraditionalFormat = true) {
 		const codeArea = getCobolCodeArea(line, useTraditionalFormat);
 		if (inDataDivision && /^\s*(WORKING-STORAGE|FILE|LOCAL-STORAGE|SCREEN|REPORT)\s+SECTION/i.test(codeArea)) {
 			inLinkageSection = false;
+			debugLog('[zCobol extractDeclaredVariables] Outra seção encontrada na linha', i);
 			continue;
 		}
 
 		// Detecta início da PROCEDURE DIVISION
-		if (/^\s*PROCEDURE\s+DIVISION/i.test(line)) {
+		if (isProcedureDivision(line, useTraditionalFormat)) {
 			inDataDivision = false;
 			inLinkageSection = false;
 			inProcedureDivision = true;
+			debugLog('[zCobol extractDeclaredVariables] PROCEDURE DIVISION encontrada na linha', i);
 			continue;
 		}
 
@@ -571,16 +579,19 @@ function extractDeclaredVariables(text, useTraditionalFormat = true) {
 			}
 
 			// Procura por declarações de variáveis (nível 01-49, 77, 88)
-			const codeArea = getCobolCodeArea(line);
+			const codeArea = getCobolCodeArea(line, useTraditionalFormat);
 			const varMatch = codeArea.match(/^\s*(01|0[2-9]|[1-4][0-9]|77)\s+([A-Z0-9][\w-]*)/i);
 			if (varMatch) {
 				const varLevel = parseInt(varMatch[1]);
 				const varName = varMatch[2].toUpperCase();
+				debugLog('[zCobol extractDeclaredVariables] Variável encontrada:', varName, 'nível', varLevel, 'linha', i);
 
 				// Ignora FILLER e palavras reservadas comuns
 				if (varName !== 'FILLER' && !varName.startsWith('FILLER-')) {
 					// Ignora variáveis de grupo (que não têm PIC e têm sub-variáveis)
-					if (!isGroupVariable(lines, i, varLevel, useTraditionalFormat)) {
+					const isGroup = isGroupVariable(lines, i, varLevel, useTraditionalFormat);
+					debugLog('[zCobol extractDeclaredVariables]', varName, 'é grupo?', isGroup);
+					if (!isGroup) {
 						const column = line.indexOf(varMatch[2]);
 						// Extrai as condições de nível 88 associadas a esta variável
 						const level88Conditions = extractLevel88Conditions(lines, i, varLevel, useTraditionalFormat);
@@ -591,14 +602,18 @@ function extractDeclaredVariables(text, useTraditionalFormat = true) {
 							isLinkage: inLinkageSection,
 							level88Conditions: level88Conditions
 						});
+						debugLog('[zCobol extractDeclaredVariables] Variável adicionada:', varName);
 					} else {
-						debugLog(`Variável ${varName} é um grupo - ignorada`);
+						debugLog(`[zCobol extractDeclaredVariables] Variável ${varName} é um grupo - ignorada`);
 					}
+				} else {
+					debugLog('[zCobol extractDeclaredVariables] FILLER ignorado:', varName);
 				}
 			}
 		}
 	}
 
+	debugLog('[zCobol extractDeclaredVariables] Total de variáveis extraídas:', variables.size);
 	return variables;
 }
 
@@ -606,12 +621,13 @@ function extractDeclaredVariables(text, useTraditionalFormat = true) {
  * Verifica se uma variável é utilizada no código
  * @param {string} text
  * @param {string} varName
+ * @param {number} declarationLine - Linha onde a variável foi declarada (para ignorar)
  * @param {boolean} isLinkage - Se true, verifica uso também na LINKAGE SECTION
  * @param {string[]} level88Conditions - Condições de nível 88 associadas à variável
  * @param {boolean} useTraditionalFormat
  * @returns {boolean}
  */
-function isVariableUsed(text, varName, isLinkage = false, level88Conditions = [], useTraditionalFormat = true) {
+function isVariableUsed(text, varName, declarationLine = -1, isLinkage = false, level88Conditions = [], useTraditionalFormat = true) {
 	const lines = text.split('\n');
 	let inProcedureDivision = false;
 	let inLinkageSection = false;
@@ -657,6 +673,11 @@ function isVariableUsed(text, varName, isLinkage = false, level88Conditions = []
 
 		// Procura uso da variável na DATA DIVISION (blocos EXEC em WORKING-STORAGE) ou PROCEDURE DIVISION
 		if (inDataDivision || (inProcedureDivision && i > procedureDivisionStartLine)) {
+			// Ignora a linha de declaração da variável
+			if (i === declarationLine) {
+				continue;
+			}
+
 			// Ignora comentários
 			if (isCobolComment(line, useTraditionalFormat)) {
 				continue;
@@ -1380,7 +1401,7 @@ function extractFileDeclarations(text, useTraditionalFormat = true) {
 	return files;
 }
 
-function hasFileOperations(text, fileName) {
+function hasFileOperations(text, fileName, useTraditionalFormat = true) {
 	const lines = text.split('\n');
 	let inProcedureDivision = false;
 	let hasOpen = false;
@@ -1405,11 +1426,11 @@ function hasFileOperations(text, fileName) {
 		}
 
 		// Ignora comentários
-		if (isCobolComment(line)) {
+		if (isCobolComment(line, useTraditionalFormat)) {
 			continue;
 		}
 
-		const lineContent = getCobolCodeArea(line);
+		const lineContent = getCobolCodeArea(line, useTraditionalFormat);
 
 		// Verifica OPEN com o nome do ficheiro
 		if (/^\s*OPEN\s+(INPUT|OUTPUT|I-O|EXTEND)/i.test(lineContent)) {
@@ -1456,7 +1477,7 @@ function findFilesWithoutOperations(text, useTraditionalFormat = true) {
 	const declaredFiles = extractFileDeclarations(text, useTraditionalFormat);
 
 	for (const [fileName, position] of declaredFiles) {
-		const operations = hasFileOperations(text, fileName);
+		const operations = hasFileOperations(text, fileName, useTraditionalFormat);
 		const missing = [];
 
 		if (!operations.hasOpen) {
@@ -1559,9 +1580,10 @@ function extractCursorDeclarations(text, useTraditionalFormat = true) {
  * Verifica operações de cursores (OPEN, FETCH, CLOSE) no código
  * @param {string} text
  * @param {string} cursorName - Nome do cursor a verificar
+ * @param {boolean} useTraditionalFormat
  * @returns {{hasOpen: boolean, hasFetch: boolean, hasClose: boolean}}
  */
-function hasCursorOperations(text, cursorName) {
+function hasCursorOperations(text, cursorName, useTraditionalFormat = true) {
 	const lines = text.split('\n');
 	let inProcedureDivision = false;
 	let hasOpen = false;
@@ -1588,7 +1610,7 @@ function hasCursorOperations(text, cursorName) {
 		}
 
 		// Ignora comentários
-		if (isCobolComment(line)) {
+		if (isCobolComment(line, useTraditionalFormat)) {
 			continue;
 		}
 
@@ -1643,7 +1665,7 @@ function findCursorsWithoutOperations(text, useTraditionalFormat = true) {
 	const declaredCursors = extractCursorDeclarations(text, useTraditionalFormat);
 
 	for (const [cursorName, position] of declaredCursors) {
-		const operations = hasCursorOperations(text, cursorName);
+		const operations = hasCursorOperations(text, cursorName, useTraditionalFormat);
 		const missing = [];
 
 		if (!operations.hasOpen) {
@@ -1989,16 +2011,22 @@ function validateCobolDocument(document) {
 	const uri = document.uri.toString();
 	const contentHash = simpleHash(text);
 
+	debugLog('[zCobol validateCobolDocument] Validando:', uri);
+	debugLog('[zCobol validateCobolDocument] Hash do conteúdo:', contentHash);
+
 	// Detecta se o ficheiro usa formato tradicional (com números de sequência)
 	const useTraditionalFormat = hasSequenceNumbers(text);
 
 	// Verifica cache - se o conteúdo não mudou, usa resultado em cache
 	const cached = validationCache.get(uri);
+	debugLog('[zCobol validateCobolDocument] Cache encontrado?', cached ? 'SIM' : 'NÃO');
 	if (cached && cached.hash === contentHash) {
+		debugLog('[zCobol validateCobolDocument] Usando cache (hash igual)');
 		diagnosticCollection.set(document.uri, cached.diagnostics);
 		return;
 	}
 
+	debugLog('[zCobol validateCobolDocument] Executando validação completa (cache inválido ou inexistente)');
 	const diagnostics = [];
 	const config = vscode.workspace.getConfiguration('zcobol-validation');
 
@@ -2007,13 +2035,16 @@ function validateCobolDocument(document) {
 
 	// Validação de variáveis não utilizadas
 	const enableUnusedVarCheck = config.get('enableUnusedVariableCheck', true);
+	debugLog('[zCobol] enableUnusedVarCheck:', enableUnusedVarCheck);
+	debugLog('[zCobol] useTraditionalFormat:', useTraditionalFormat);
 	if (enableUnusedVarCheck) {
 		const declaredVariables = extractDeclaredVariables(text, useTraditionalFormat);
-		debugLog('Variáveis declaradas:', Array.from(declaredVariables.keys()));
+		debugLog('[zCobol] Variáveis declaradas:', Array.from(declaredVariables.keys()));
+		debugLog('[zCobol] Total de variáveis declaradas:', declaredVariables.size);
 
 		// Verifica cada variável declarada
 		for (const [varName, position] of declaredVariables) {
-			const isUsed = isVariableUsed(text, varName, position.isLinkage, position.level88Conditions, useTraditionalFormat);
+			const isUsed = isVariableUsed(text, varName, position.line, position.isLinkage, position.level88Conditions, useTraditionalFormat);
 			debugLog(`Variável ${varName} (${position.isLinkage ? 'LINKAGE' : 'WORKING-STORAGE'}): ${isUsed ? 'USADA' : 'NÃO USADA'}`);
 
 			// Se a variável tem níveis 88, mostra-os
