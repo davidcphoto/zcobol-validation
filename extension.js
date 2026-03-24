@@ -1818,7 +1818,8 @@ function findHardcodedValues(text, enableInString = false, enableInDisplay = fal
 				const value = match[0];
 				// Encontra a posição na linha original
 				const column = line.indexOf(value);
-				if (column !== -1) {
+				// Só valida se estiver até a coluna 72 (índice 71)
+				if (column !== -1 && column <= 71) {
 					hardcoded.push({
 						line: lineIndex,
 						column: column,
@@ -1875,15 +1876,17 @@ function findHardcodedValues(text, enableInString = false, enableInDisplay = fal
 					if (!isPartOfIdentifier && !isInRefMod) {
 						// A posição em tempLine é a mesma que em lineContent (mantivemos o tamanho)
 						const fullColumn = line.indexOf(lineContent) + posInTemp;
-
-						hardcoded.push({
-							line: lineIndex,
-							column: fullColumn,
-							length: value.length,
-							value: value,
-							type: 'number'
-						});
-						debugLog(`Número hardcoded encontrado na linha ${lineIndex}: ${value}`);
+						// Só valida se estiver até a coluna 72 (índice 71)
+						if (fullColumn <= 71) {
+							hardcoded.push({
+								line: lineIndex,
+								column: fullColumn,
+								length: value.length,
+								value: value,
+								type: 'number'
+							});
+							debugLog(`Número hardcoded encontrado na linha ${lineIndex}: ${value}`);
+						}
 					}
 				}
 			}

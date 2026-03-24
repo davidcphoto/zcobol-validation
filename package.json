@@ -7,7 +7,7 @@
     "type": "git",
     "url": "https://github.com/davidcphoto/zcobol-validation.git"
   },
-  "version": "1.2.4",
+  "version": "1.2.5",
   "icon": "ZCobolValidation.png",
   "keywords": [
     "cobol",
