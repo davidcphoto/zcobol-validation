@@ -1,3 +1,4 @@
+
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 const vscode = require('vscode');
@@ -171,10 +172,7 @@ function isLinkageSection(line, useTraditionalFormat = true) {
  * @param {boolean} useTraditionalFormat
  * @returns {boolean}
  */
-function isFileControl(line, useTraditionalFormat = true) {
-	const codeArea = getCobolCodeArea(line, useTraditionalFormat);
-	return /^\s*FILE-CONTROL/i.test(codeArea);
-}
+
 
 // Função reservada para otimizações futuras - parsing centralizado
 /*
@@ -2872,6 +2870,27 @@ class CobolCodeActionProvider {
  * @param {vscode.ExtensionContext} context
  */
 function activate(context) {
+	// --- DefinitionProvider para cursores COBOL ---
+	const cursorDefinitionProvider = new CobolCursorDefinitionProvider();
+	context.subscriptions.push(
+		vscode.languages.registerDefinitionProvider(
+			[
+				{ scheme: 'file', language: 'cobol' },
+				{ scheme: 'file', language: 'COBOL' },
+				{ scheme: 'file', pattern: '**/*.cbl' },
+				{ scheme: 'file', pattern: '**/*.cob' },
+				{ scheme: 'file', pattern: '**/*.cobol' },
+				{ scheme: 'file', pattern: '**/*.cpy' },
+				{ scheme: 'zowe-ds', language: 'cobol' },
+				{ scheme: 'zowe-ds', language: 'COBOL' },
+				{ scheme: 'zowe-uss', language: 'cobol' },
+				{ scheme: 'zowe-uss', language: 'COBOL' },
+				{ scheme: 'vscode-remote', language: 'cobol' },
+				{ scheme: 'vscode-remote', language: 'COBOL' }
+			],
+			cursorDefinitionProvider
+		)
+	);
 
 	// Use the console to output diagnostic information (console.log) and errors (console.error)
 	// This line of code will only be executed once when your extension is activated
@@ -3344,8 +3363,44 @@ function deactivate() {
 	}
 }
 
+// --- DefinitionProvider para cursores COBOL ---
+class CobolCursorDefinitionProvider {
+	provideDefinition(document, position) {
+		const text = document.getText();
+		const useTraditionalFormat = hasSequenceNumbers(text);
+		const line = document.lineAt(position.line).text;
+		const codeArea = getCobolCodeArea(line, useTraditionalFormat);
+
+		// Regex para OPEN/FETCH/CLOSE <CURSORNAME>
+		const opMatch = codeArea.match(/\b(OPEN|FETCH|CLOSE)\b\s+([A-Z0-9][\w-]*)/i);
+		if (!opMatch) {
+			return null;
+		}
+		const cursorName = opMatch[2].toUpperCase();
+		// Verifica se o cursorName está sob o cursor
+		const idx = codeArea.toUpperCase().indexOf(cursorName);
+		const colOffset = getColumnOffset(useTraditionalFormat);
+		const start = idx + colOffset;
+		const end = start + cursorName.length;
+		if (!(position.character >= start && position.character <= end)) {
+			return null;
+		}
+
+		// Procura a declaração do cursor
+		const cursors = extractCursorDeclarations(text, useTraditionalFormat);
+		const decl = cursors.get(cursorName);
+		if (!decl) {
+			return null;
+		}
+		return new vscode.Location(
+			document.uri,
+			new vscode.Range(decl.line, decl.column, decl.line, decl.column + cursorName.length)
+		);
+	}
+}
+
 module.exports = {
-	activate,
-	deactivate
+    activate,
+    deactivate
 }
 
