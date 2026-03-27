@@ -1,3 +1,15 @@
+# [1.3.0] - 2026-03-26
+
+### Added
+- **Go to Definition for Cursors**: Ctrl+Click/F12 no nome do cursor (em OPEN, FETCH, CLOSE ou na declaração) navega para a declaração do cursor.
+- **Find All References for Cursors**: Shift+F12 mostra todas as referências (operações e declaração) de cada cursor COBOL.
+
+### Improved
+- Navegação consistente entre operações e declaração de cursores SQL.
+
+### Fixed
+- Removido o DocumentLinkProvider para evitar confusão com links que não movem o cursor.
+
 # Change Log
 
 All notable changes to the "zcobol-validation" extension will be documented in this file.

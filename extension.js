@@ -1,4 +1,105 @@
+	// --- ReferenceProvider para cursores COBOL ---
+	class CobolCursorReferenceProvider {
+		provideReferences(document, position, context, token) {
+			const text = document.getText();
+			const useTraditionalFormat = hasSequenceNumbers(text);
+			const line = document.lineAt(position.line).text;
+			const codeArea = getCobolCodeArea(line, useTraditionalFormat);
 
+			// Tenta identificar se está sobre a declaração do cursor ou sobre uma referência
+			// Procura nome do cursor na linha
+			let cursorName = null;
+			// Se for declaração
+			const declMatch = codeArea.match(/DECLARE\s+([A-Z0-9][\w-]*)\s+CURSOR/i);
+			if (declMatch) {
+				cursorName = declMatch[1].toUpperCase();
+			} else {
+				// Se for referência numa operação
+				const opMatch = codeArea.match(/\b(OPEN|FETCH|CLOSE)\b\s+([A-Z0-9][\w-]*)/i);
+				if (opMatch) {
+					cursorName = opMatch[2].toUpperCase();
+				}
+			}
+			if (!cursorName) {
+				return [];
+			}
+
+			// Procura todas as referências (operações) ao cursor
+			const locations = [];
+			const lines = text.split('\n');
+			for (let i = 0; i < lines.length; i++) {
+				const area = getCobolCodeArea(lines[i], useTraditionalFormat);
+				const regex = new RegExp(`\\b(OPEN|FETCH|CLOSE)\\b\\s+${cursorName}\\b`, 'i');
+				const match = area.match(regex);
+				if (match) {
+					const col = area.indexOf(cursorName);
+					if (col !== -1) {
+						locations.push(new vscode.Location(
+							document.uri,
+							new vscode.Range(i, col, i, col + cursorName.length)
+						));
+					}
+				}
+			}
+			// Adiciona a declaração do cursor como referência também
+			const cursors = extractCursorDeclarations(text, useTraditionalFormat);
+			const decl = cursors.get(cursorName);
+			if (decl) {
+				locations.push(new vscode.Location(
+					document.uri,
+					new vscode.Range(decl.line, decl.column, decl.line, decl.column + cursorName.length)
+				));
+			}
+			return locations;
+		}
+	}
+
+	// --- DefinitionProvider para cursores COBOL ---
+	class CobolCursorDefinitionProvider {
+		provideDefinition(document, position) {
+			const text = document.getText();
+			const useTraditionalFormat = hasSequenceNumbers(text);
+			const line = document.lineAt(position.line).text;
+			const codeArea = getCobolCodeArea(line, useTraditionalFormat);
+
+			let cursorName = null;
+			// Se for declaração
+			const declMatch = codeArea.match(/DECLARE\s+([A-Z0-9][\w-]*)\s+CURSOR/i);
+			if (declMatch) {
+				cursorName = declMatch[1].toUpperCase();
+			} else {
+				// Se for referência numa operação
+				const opMatch = codeArea.match(/\b(OPEN|FETCH|CLOSE)\b\s+([A-Z0-9][\w-]*)/i);
+				if (opMatch) {
+					cursorName = opMatch[2].toUpperCase();
+				}
+			}
+			if (!cursorName) {
+				return null;
+			}
+
+			// Verifica se o cursorName está sob o cursor
+			const idx = codeArea.toUpperCase().indexOf(cursorName);
+			const colOffset = getColumnOffset(useTraditionalFormat);
+			const start = idx + colOffset;
+			const end = start + cursorName.length;
+			if (!(position.character >= start && position.character <= end)) {
+				return null;
+			}
+
+			// Procura a declaração do cursor
+			const cursors = extractCursorDeclarations(text, useTraditionalFormat);
+			const decl = cursors.get(cursorName);
+			if (!decl) {
+				return null;
+			}
+			return new vscode.Location(
+				document.uri,
+				new vscode.Range(decl.line, decl.column, decl.line, decl.column + cursorName.length)
+			);
+		}
+	}
+	// ...existing code...
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 const vscode = require('vscode');
@@ -2870,6 +2971,27 @@ class CobolCodeActionProvider {
  * @param {vscode.ExtensionContext} context
  */
 function activate(context) {
+		// --- ReferenceProvider para cursores COBOL ---
+		const cursorReferenceProvider = new CobolCursorReferenceProvider();
+		context.subscriptions.push(
+			vscode.languages.registerReferenceProvider(
+				[
+					{ scheme: 'file', language: 'cobol' },
+					{ scheme: 'file', language: 'COBOL' },
+					{ scheme: 'file', pattern: '**/*.cbl' },
+					{ scheme: 'file', pattern: '**/*.cob' },
+					{ scheme: 'file', pattern: '**/*.cobol' },
+					{ scheme: 'file', pattern: '**/*.cpy' },
+					{ scheme: 'zowe-ds', language: 'cobol' },
+					{ scheme: 'zowe-ds', language: 'COBOL' },
+					{ scheme: 'zowe-uss', language: 'cobol' },
+					{ scheme: 'zowe-uss', language: 'COBOL' },
+					{ scheme: 'vscode-remote', language: 'cobol' },
+					{ scheme: 'vscode-remote', language: 'COBOL' }
+				],
+				cursorReferenceProvider
+			)
+		);
 	// --- DefinitionProvider para cursores COBOL ---
 	const cursorDefinitionProvider = new CobolCursorDefinitionProvider();
 	context.subscriptions.push(
@@ -3360,42 +3482,6 @@ function deactivate() {
 	if (diagnosticCollection) {
 		diagnosticCollection.clear();
 		diagnosticCollection.dispose();
-	}
-}
-
-// --- DefinitionProvider para cursores COBOL ---
-class CobolCursorDefinitionProvider {
-	provideDefinition(document, position) {
-		const text = document.getText();
-		const useTraditionalFormat = hasSequenceNumbers(text);
-		const line = document.lineAt(position.line).text;
-		const codeArea = getCobolCodeArea(line, useTraditionalFormat);
-
-		// Regex para OPEN/FETCH/CLOSE <CURSORNAME>
-		const opMatch = codeArea.match(/\b(OPEN|FETCH|CLOSE)\b\s+([A-Z0-9][\w-]*)/i);
-		if (!opMatch) {
-			return null;
-		}
-		const cursorName = opMatch[2].toUpperCase();
-		// Verifica se o cursorName está sob o cursor
-		const idx = codeArea.toUpperCase().indexOf(cursorName);
-		const colOffset = getColumnOffset(useTraditionalFormat);
-		const start = idx + colOffset;
-		const end = start + cursorName.length;
-		if (!(position.character >= start && position.character <= end)) {
-			return null;
-		}
-
-		// Procura a declaração do cursor
-		const cursors = extractCursorDeclarations(text, useTraditionalFormat);
-		const decl = cursors.get(cursorName);
-		if (!decl) {
-			return null;
-		}
-		return new vscode.Location(
-			document.uri,
-			new vscode.Range(decl.line, decl.column, decl.line, decl.column + cursorName.length)
-		);
 	}
 }
 

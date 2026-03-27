@@ -92,6 +92,15 @@ Detects level 88 condition names that are declared but never used in the code.
   - Ignores 88-level conditions associated with FILLER variables
   - Example: `88 STATUS-OK VALUE 'Y'` triggers warning if `STATUS-OK` is never used
 
+#### 13. **Cursor Navigation** (NEW in 1.3.0)
+
+- ***Go to Definition (Ctrl+Click / F12)*** - Click or F12 on any cursor name (in OPEN, FETCH, CLOSE, or DECLARE) to jump to the cursor declaration.
+
+- ***Find All References (Shift+F12)*** - Shows all references (OPEN, FETCH, CLOSE, and declaration) for the selected cursor.
+
+>This makes it easy to navigate and refactor SQL cursors in COBOL code!
+
+
 ## Requirements
 
 - Visual Studio Code 1.75.0 or higher
@@ -219,26 +228,3 @@ Initial comprehensive release with:
 - Cursor operations validation
 - Automatic quick fixes
 - Customizable settings
-
-### 0.0.1
-
-Initial beta release
-
----
-
-**Developed for mainframe COBOL development teams** 🚀
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code.  Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux)
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux)
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
